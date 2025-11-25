@@ -106,5 +106,4 @@ Cleaned up temporary file: index.scip.json
 
 ## License
 
-MIT OR Apache-2.0
-
+MIT
