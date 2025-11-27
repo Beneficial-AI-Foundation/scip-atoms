@@ -112,12 +112,36 @@ fn is_function_like(kind: i32) -> bool {
 pub fn build_call_graph(scip_data: &ScipIndex) -> HashMap<String, FunctionNode> {
     let mut call_graph: HashMap<String, FunctionNode> = HashMap::new();
     let mut function_symbols: HashSet<String> = HashSet::new();
+    let mut symbol_to_display_name: HashMap<String, String> = HashMap::new();
+
+    // Pre-pass: Find where each symbol is DEFINED (symbol_roles == 1)
+    // This is the authoritative source for file paths, not the symbols array
+    let mut symbol_to_def_path: HashMap<String, String> = HashMap::new();
+    for doc in &scip_data.documents {
+        let rel_path = doc.relative_path.trim_start_matches('/').to_string();
+        for occurrence in &doc.occurrences {
+            let is_definition = occurrence.symbol_roles.unwrap_or(0) & 1 == 1;
+            if is_definition {
+                symbol_to_def_path.insert(occurrence.symbol.clone(), rel_path.clone());
+            }
+        }
+    }
 
     // First pass: identify all function symbols
     for doc in &scip_data.documents {
         for symbol in &doc.symbols {
             if is_function_like(symbol.kind) {
                 function_symbols.insert(symbol.symbol.clone());
+                symbol_to_display_name.insert(
+                    symbol.symbol.clone(),
+                    symbol.display_name.clone().unwrap_or_else(|| "unknown".to_string()),
+                );
+
+                // Use the DEFINITION location if available, otherwise fall back to symbols array location
+                let rel_path = symbol_to_def_path
+                    .get(&symbol.symbol)
+                    .cloned()
+                    .unwrap_or_else(|| doc.relative_path.trim_start_matches('/').to_string());
 
                 call_graph.insert(
                     symbol.symbol.clone(),
@@ -127,7 +151,7 @@ pub fn build_call_graph(scip_data: &ScipIndex) -> HashMap<String, FunctionNode> 
                             .display_name
                             .clone()
                             .unwrap_or_else(|| "unknown".to_string()),
-                        relative_path: doc.relative_path.trim_start_matches('/').to_string(),
+                        relative_path: rel_path,
                         callees: HashSet::new(),
                         range: Vec::new(),
                     },
@@ -176,8 +200,8 @@ pub fn build_call_graph(scip_data: &ScipIndex) -> HashMap<String, FunctionNode> 
 pub fn symbol_to_path(symbol: &str, display_name: &str) -> String {
     let mut s = symbol;
     
-    // Skip "verus-analyzer cargo " prefix if present
-    if let Some(rest) = symbol.strip_prefix("verus-analyzer cargo ") {
+    // Skip "rust-analyzer cargo " prefix if present
+    if let Some(rest) = symbol.strip_prefix("rust-analyzer cargo ") {
         s = rest;
     }
 
