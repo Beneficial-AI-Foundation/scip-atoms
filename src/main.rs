@@ -1,4 +1,4 @@
-use scip_atoms::{build_call_graph, convert_to_atoms_with_lines, parse_scip_json};
+use scip_atoms::{build_call_graph, convert_to_atoms_with_parsed_spans, parse_scip_json};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -149,14 +149,15 @@ fn main() {
         }
     };
 
-    let call_graph = build_call_graph(&scip_index);
+    let (call_graph, symbol_to_display_name) = build_call_graph(&scip_index);
     println!("  ✓ Call graph built with {} functions", call_graph.len());
     println!();
 
     // Step 4: Convert to atoms format with line numbers
-    println!("Step 4/4: Converting to atoms format with line numbers...");
+    println!("Step 4/4: Converting to atoms format with accurate line numbers...");
+    println!("  Parsing source files with verus_syn for accurate function spans...");
     
-    let atoms = convert_to_atoms_with_lines(&call_graph);
+    let atoms = convert_to_atoms_with_parsed_spans(&call_graph, &symbol_to_display_name, &project_path_buf);
     println!("  ✓ Converted {} functions to atoms format", atoms.len());
 
     // Write the output
@@ -183,4 +184,6 @@ fn main() {
         println!("Cleaned up temporary file: {}", temp_json_path.display());
     }
 }
+
+
 

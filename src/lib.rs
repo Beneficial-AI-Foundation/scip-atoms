@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
+
+pub mod verus_parser;
 
 /// SCIP data structures
 #[derive(Debug, Serialize, Deserialize)]
@@ -108,10 +111,12 @@ fn is_function_like(kind: i32) -> bool {
     matches!(kind, 6 | 17 | 26 | 80) // Method, Function, etc.
 }
 
-/// Build a call graph from SCIP data
-pub fn build_call_graph(scip_data: &ScipIndex) -> HashMap<String, FunctionNode> {
+/// Build a call graph from SCIP data.
+/// Returns the call graph and a map of all function symbols to their display names.
+pub fn build_call_graph(scip_data: &ScipIndex) -> (HashMap<String, FunctionNode>, HashMap<String, String>) {
     let mut call_graph: HashMap<String, FunctionNode> = HashMap::new();
-    let mut function_symbols: HashSet<String> = HashSet::new();
+    let mut project_function_symbols: HashSet<String> = HashSet::new();
+    let mut all_function_symbols: HashSet<String> = HashSet::new();
     let mut symbol_to_display_name: HashMap<String, String> = HashMap::new();
 
     // Pre-pass: Find where each symbol is DEFINED (symbol_roles == 1)
@@ -131,31 +136,32 @@ pub fn build_call_graph(scip_data: &ScipIndex) -> HashMap<String, FunctionNode> 
     for doc in &scip_data.documents {
         for symbol in &doc.symbols {
             if is_function_like(symbol.kind) {
-                function_symbols.insert(symbol.symbol.clone());
+                // Track ALL function symbols (for dependency tracking, including external)
+                all_function_symbols.insert(symbol.symbol.clone());
                 symbol_to_display_name.insert(
                     symbol.symbol.clone(),
                     symbol.display_name.clone().unwrap_or_else(|| "unknown".to_string()),
                 );
 
-                // Use the DEFINITION location if available, otherwise fall back to symbols array location
-                let rel_path = symbol_to_def_path
-                    .get(&symbol.symbol)
-                    .cloned()
-                    .unwrap_or_else(|| doc.relative_path.trim_start_matches('/').to_string());
+                // Only add to call_graph if DEFINED in this project
+                // External functions should only appear as dependencies, not as entries
+                if let Some(rel_path) = symbol_to_def_path.get(&symbol.symbol) {
+                    project_function_symbols.insert(symbol.symbol.clone());
 
-                call_graph.insert(
-                    symbol.symbol.clone(),
-                    FunctionNode {
-                        symbol: symbol.symbol.clone(),
-                        display_name: symbol
-                            .display_name
-                            .clone()
-                            .unwrap_or_else(|| "unknown".to_string()),
-                        relative_path: rel_path,
-                        callees: HashSet::new(),
-                        range: Vec::new(),
-                    },
-                );
+                    call_graph.insert(
+                        symbol.symbol.clone(),
+                        FunctionNode {
+                            symbol: symbol.symbol.clone(),
+                            display_name: symbol
+                                .display_name
+                                .clone()
+                                .unwrap_or_else(|| "unknown".to_string()),
+                            relative_path: rel_path.clone(),
+                            callees: HashSet::new(),
+                            range: Vec::new(),
+                        },
+                    );
+                }
             }
         }
     }
@@ -174,14 +180,16 @@ pub fn build_call_graph(scip_data: &ScipIndex) -> HashMap<String, FunctionNode> 
         for occurrence in &ordered_occurrences {
             let is_definition = occurrence.symbol_roles.unwrap_or(0) & 1 == 1;
 
-            if is_definition && function_symbols.contains(&occurrence.symbol) {
+            // Track when we enter a project function definition
+            if is_definition && project_function_symbols.contains(&occurrence.symbol) {
                 current_function = Some(occurrence.symbol.clone());
                 if let Some(node) = call_graph.get_mut(&occurrence.symbol) {
                     node.range = occurrence.range.clone();
                 }
             }
 
-            if !is_definition && function_symbols.contains(&occurrence.symbol) {
+            // Track ALL function calls (including to external functions)
+            if !is_definition && all_function_symbols.contains(&occurrence.symbol) {
                 if let Some(caller) = &current_function {
                     if caller != &occurrence.symbol {
                         if let Some(caller_node) = call_graph.get_mut(caller) {
@@ -193,7 +201,7 @@ pub fn build_call_graph(scip_data: &ScipIndex) -> HashMap<String, FunctionNode> 
         }
     }
 
-    call_graph
+    (call_graph, symbol_to_display_name)
 }
 
 /// Convert symbol to a clean path format
@@ -235,26 +243,84 @@ pub fn symbol_to_path(symbol: &str, display_name: &str) -> String {
     clean_path
 }
 
-/// Convert call graph to atoms with line numbers format
-pub fn convert_to_atoms_with_lines(call_graph: &HashMap<String, FunctionNode>) -> Vec<AtomWithLines> {
+/// Convert call graph to atoms with line numbers format.
+///
+/// This version uses only SCIP data, which only provides the function NAME location,
+/// so lines_start and lines_end will be the same (or close for multi-line spans).
+/// For accurate function body spans, use `convert_to_atoms_with_parsed_spans` instead.
+pub fn convert_to_atoms_with_lines(
+    call_graph: &HashMap<String, FunctionNode>,
+    symbol_to_display_name: &HashMap<String, String>,
+) -> Vec<AtomWithLines> {
+    convert_to_atoms_with_lines_internal(call_graph, symbol_to_display_name, None)
+}
+
+/// Convert call graph to atoms with accurate line numbers by parsing source files.
+///
+/// This version uses verus_syn to parse source files and get accurate function body spans.
+pub fn convert_to_atoms_with_parsed_spans(
+    call_graph: &HashMap<String, FunctionNode>,
+    symbol_to_display_name: &HashMap<String, String>,
+    project_root: &Path,
+) -> Vec<AtomWithLines> {
+    // Collect all unique relative paths
+    let relative_paths: Vec<String> = call_graph
+        .values()
+        .map(|node| node.relative_path.clone())
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    // Build the span map by parsing all source files
+    let span_map = verus_parser::build_function_span_map(project_root, &relative_paths);
+
+    convert_to_atoms_with_lines_internal(call_graph, symbol_to_display_name, Some(&span_map))
+}
+
+/// Internal function that does the actual conversion.
+fn convert_to_atoms_with_lines_internal(
+    call_graph: &HashMap<String, FunctionNode>,
+    symbol_to_display_name: &HashMap<String, String>,
+    span_map: Option<&HashMap<(String, String, usize), usize>>,
+) -> Vec<AtomWithLines> {
     call_graph
         .values()
         .map(|node| {
             let mut dependencies = HashMap::new();
             for callee in &node.callees {
-                if let Some(callee_node) = call_graph.get(callee) {
-                    let dep_path = symbol_to_path(&callee_node.symbol, &callee_node.display_name);
-                    dependencies.insert(dep_path, DependencyInfo { visible: true });
-                }
+                // Get display name from call_graph (project functions) or symbol map (all functions)
+                let display_name = call_graph
+                    .get(callee)
+                    .map(|n| n.display_name.clone())
+                    .or_else(|| symbol_to_display_name.get(callee).cloned())
+                    .unwrap_or_else(|| "unknown".to_string());
+                
+                let dep_path = symbol_to_path(callee, &display_name);
+                dependencies.insert(dep_path, DependencyInfo { visible: true });
             }
 
-            // Extract line numbers from SCIP range [start_line, start_col, end_line, end_col]
-            let (lines_start, lines_end) = if node.range.len() >= 3 {
-                let start = node.range[0] as usize + 1; // Convert to 1-based
-                let end = node.range[2] as usize + 1;
-                (start, end)
+            // Get start line from SCIP range (0-based, convert to 1-based)
+            let lines_start = if !node.range.is_empty() {
+                node.range[0] as usize + 1
             } else {
-                (0, 0)
+                0
+            };
+
+            // Try to get accurate end line from parsed spans
+            let lines_end = if let Some(map) = span_map {
+                verus_parser::get_function_end_line(
+                    map,
+                    &node.relative_path,
+                    &node.display_name,
+                    lines_start,
+                )
+                .unwrap_or(lines_start) // Fallback to start line if not found
+            } else {
+                // Fallback: use SCIP range (which only covers the function name)
+                match node.range.len() {
+                    4 => node.range[2] as usize + 1,
+                    _ => lines_start,
+                }
             };
 
             AtomWithLines {
