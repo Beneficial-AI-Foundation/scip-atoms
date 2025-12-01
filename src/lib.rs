@@ -204,43 +204,76 @@ pub fn build_call_graph(scip_data: &ScipIndex) -> (HashMap<String, FunctionNode>
     (call_graph, symbol_to_display_name)
 }
 
-/// Convert symbol to a clean path format
-pub fn symbol_to_path(symbol: &str, display_name: &str) -> String {
+/// Convert symbol to a path format with specified separator
+fn symbol_to_path_with_sep(symbol: &str, display_name: &str, sep: &str) -> String {
     let mut s = symbol;
+    let mut crate_name = String::new();
     
-    // Skip "rust-analyzer cargo " prefix if present
+    // Skip "rust-analyzer cargo " prefix and extract crate name
     if let Some(rest) = symbol.strip_prefix("rust-analyzer cargo ") {
         s = rest;
+        // Extract crate name (everything before the first space, which precedes the version)
+        if let Some(space_pos) = s.find(' ') {
+            crate_name = s[..space_pos].replace('-', "_");
+            s = &s[space_pos + 1..];  // Move past crate name
+        }
     }
 
-    // Skip version part if present
+    // Skip version part if present (e.g., "4.1.3 ")
     if let Some(pos) = s.find(|c: char| c.is_ascii_digit()) {
         if let Some(space_pos) = s[pos..].find(' ') {
             s = s[(pos + space_pos + 1)..].trim();
         }
     }
 
+    let sep_char = sep.chars().next().unwrap_or('/');
     let mut clean_path = s
         .trim_end_matches('.')
         .replace('-', "_")
-        .replace(['[', ']', '#'], "/")
-        .trim_end_matches('/')
-        .replace(&['`', '(', ')', '[', ']'][..], "")
-        .replace("//", "/");
+        .replace(['[', ']', '#'], sep)
+        .replace('/', sep)
+        .trim_end_matches(sep_char)
+        .replace(&['`', '(', ')', '[', ']'][..], "");
+
+    // Clean up double separators
+    let double_sep = format!("{}{}", sep, sep);
+    while clean_path.contains(&double_sep) {
+        clean_path = clean_path.replace(&double_sep, sep);
+    }
 
     // Remove angle-bracketed generics
     let re = regex::Regex::new(r"<[^>]*>").unwrap_or_else(|_| regex::Regex::new(r"").unwrap());
     clean_path = re.replace_all(&clean_path, "").to_string();
 
-    if !clean_path.ends_with(display_name) {
-        clean_path = format!("{clean_path}/{display_name}")
+    // Clean up leading/trailing separators
+    clean_path = clean_path.trim_matches(&sep.chars().collect::<Vec<_>>()[..]).to_string();
+
+    // Add crate name prefix if we have one and it's not already there
+    if !crate_name.is_empty() && !clean_path.starts_with(&crate_name) {
+        clean_path = format!("{}{}{}", crate_name, sep, clean_path);
     }
 
-    if clean_path.len() > 128 {
-        clean_path.truncate(128);
+    // Ensure the path ends with the display name
+    if !clean_path.ends_with(display_name) {
+        clean_path = format!("{}{}{}", clean_path, sep, display_name)
+    }
+
+    // Truncate if too long
+    if clean_path.len() > 200 {
+        clean_path.truncate(200);
     }
 
     clean_path
+}
+
+/// Convert symbol to Rust-style path with :: separators (for code-function field)
+pub fn symbol_to_rust_path(symbol: &str, display_name: &str) -> String {
+    symbol_to_path_with_sep(symbol, display_name, "::")
+}
+
+/// Convert symbol to slash-separated path (for dependencies)
+pub fn symbol_to_path(symbol: &str, display_name: &str) -> String {
+    symbol_to_path_with_sep(symbol, display_name, "/")
 }
 
 /// Convert call graph to atoms with line numbers format.
@@ -328,7 +361,7 @@ fn convert_to_atoms_with_lines_internal(
                 visible: true,
                 dependencies,
                 code_path: node.relative_path.clone(),
-                code_function: symbol_to_path(&node.symbol, &node.display_name),
+                code_function: symbol_to_rust_path(&node.symbol, &node.display_name),
                 code_text: CodeTextInfo {
                     lines_start,
                     lines_end,
