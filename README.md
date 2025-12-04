@@ -10,8 +10,10 @@ cargo install --path .
 
 ### Prerequisites
 
+The following tools are only needed when generating SCIP data (first run or with `--regenerate-scip`). If you already have cached data in `<project_path>/data/`, these are not required.
+
 Install [verus-analyzer](https://github.com/verus-lang/verus-analyzer) and [scip](https://github.com/sourcegraph/scip/).
-For convenience, one can use the bellow scripts.
+For convenience, one can use the below scripts:
 ```bash
 # Install using Python scripts (recommended)
 git clone https://github.com/Beneficial-AI-Foundation/installers_for_various_tools
@@ -23,21 +25,62 @@ python3 scip_installer.py
 ## Usage
 
 ```bash
-scip-atoms <project_path> <output_json>
+scip-atoms <project_path> [output_json] [--regenerate-scip]
 ```
 
-Example:
+### Arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `<project_path>` | Yes | Path to the Rust/Verus project |
+| `[output_json]` | No | Output file path (default: `atoms.json`) |
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `--regenerate-scip`, `-r` | Force regeneration of the SCIP index and JSON, even if cached data exists |
+
+### Examples
+
 ```bash
+# Simplest usage - outputs to atoms.json
+scip-atoms ./my-rust-project
+
+# Specify custom output file
 scip-atoms ./my-rust-project output.json
+
+# Force regeneration of SCIP data
+scip-atoms ./my-rust-project --regenerate-scip
+scip-atoms ./my-rust-project custom_output.json -r
 ```
 
 ## How It Works
 
-1. Runs `verus-analyzer scip` on your project to generate a SCIP index
-2. Converts the binary index to JSON using `scip print --json`
-3. Parses the SCIP data to extract functions and their call dependencies
+1. **Checks for cached SCIP data** in `<project_path>/data/`
+2. If not found (or `--regenerate-scip` is used):
+   - Runs `verus-analyzer scip` to generate a SCIP index
+   - Converts the binary index to JSON using `scip print --json`
+   - **Caches both files** in `<project_path>/data/` for future runs
+3. Parses the SCIP JSON to extract functions and their call dependencies
 4. **Parses source files with `verus_syn`** to get accurate function body spans
 5. Outputs compact JSON with line number ranges instead of full code
+
+### SCIP Data Caching
+
+To speed up subsequent runs, the tool caches generated SCIP data in the `data/` folder:
+
+```
+<project_path>/
+└── data/
+    ├── index.scip       # Binary SCIP index
+    └── index.scip.json  # JSON conversion (used by the tool)
+```
+
+**Benefits:**
+- Subsequent runs skip the slow `verus-analyzer scip` and `scip print --json` steps
+- When using cached data, `verus-analyzer` and `scip` tools don't need to be installed
+- Use `--regenerate-scip` when your source code changes and you need fresh data
 
 ### Accurate Line Spans with verus_syn
 
@@ -91,26 +134,29 @@ This means you get a complete picture of what each function calls, while keeping
 
 ## Example Output
 
+### First run (generating SCIP data)
+
 ```
+$ scip-atoms ./my-project
+
 ═══════════════════════════════════════════════════════════
   SCIP Atoms - Generate Compact Call Graph Data
 ═══════════════════════════════════════════════════════════
 
-Checking prerequisites...
-  ✓ verus-analyzer found
-  ✓ scip found
   ✓ Valid Rust project found
+  ✓ Prerequisites verified (verus-analyzer, scip)
 
-Step 1/4: Running verus-analyzer scip on ./my-project...
+Generating SCIP index for ./my-project (no existing SCIP data found)...
+  (This may take a while for large projects)
   ✓ SCIP index generated successfully
+  ✓ index.scip saved to ./my-project/data/index.scip
+Converting index.scip to JSON...
+  ✓ SCIP JSON saved to ./my-project/data/index.scip.json
 
-Step 2/4: Converting index.scip to JSON...
-  ✓ SCIP JSON generated
-
-Step 3/4: Parsing SCIP JSON and building call graph...
+Parsing SCIP JSON and building call graph...
   ✓ Call graph built with 355 functions
 
-Step 4/4: Converting to atoms format with accurate line numbers...
+Converting to atoms format with accurate line numbers...
   Parsing source files with verus_syn for accurate function spans...
   ✓ Converted 355 functions to atoms format
 
@@ -118,14 +164,44 @@ Step 4/4: Converting to atoms format with accurate line numbers...
   ✓ SUCCESS
 ═══════════════════════════════════════════════════════════
 
-Output written to: output.json
+Output written to: atoms.json
 
 Summary:
   - Total functions: 355
   - Total dependencies: 433
   - Output format: atoms with line numbers and visibility flags
+```
 
-Cleaned up temporary file: index.scip.json
+### Subsequent runs (using cached data)
+
+```
+$ scip-atoms ./my-project
+
+═══════════════════════════════════════════════════════════
+  SCIP Atoms - Generate Compact Call Graph Data
+═══════════════════════════════════════════════════════════
+
+  ✓ Valid Rust project found
+  ✓ Found existing SCIP JSON at ./my-project/data/index.scip.json
+    (use --regenerate-scip to force regeneration)
+
+Parsing SCIP JSON and building call graph...
+  ✓ Call graph built with 355 functions
+
+Converting to atoms format with accurate line numbers...
+  Parsing source files with verus_syn for accurate function spans...
+  ✓ Converted 355 functions to atoms format
+
+═══════════════════════════════════════════════════════════
+  ✓ SUCCESS
+═══════════════════════════════════════════════════════════
+
+Output written to: atoms.json
+
+Summary:
+  - Total functions: 355
+  - Total dependencies: 433
+  - Output format: atoms with line numbers and visibility flags
 ```
 
 ## License
