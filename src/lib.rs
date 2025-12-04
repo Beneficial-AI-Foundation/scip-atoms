@@ -66,6 +66,7 @@ pub struct SignatureDocumentation {
 pub struct FunctionNode {
     pub symbol: String,
     pub display_name: String,
+    pub signature_text: String,
     pub relative_path: String,
     pub callees: HashSet<String>,
     pub range: Vec<i32>,
@@ -105,56 +106,137 @@ fn is_function_like(kind: i32) -> bool {
     matches!(kind, 6 | 17 | 26 | 80) // Method, Function, etc.
 }
 
+/// Create a unique key for a function by combining symbol and signature.
+/// This handles cases where multiple trait impls have the same symbol but different signatures.
+fn make_unique_key(symbol: &str, signature: &str) -> String {
+    format!("{}|{}", symbol, signature)
+}
+
 /// Build a call graph from SCIP data.
 /// Returns the call graph and a map of all function symbols to their display names.
-pub fn build_call_graph(scip_data: &ScipIndex) -> (HashMap<String, FunctionNode>, HashMap<String, String>) {
+///
+/// Note: Multiple trait implementations (e.g., `impl Mul<A> for B` and `impl Mul<B> for A`)
+/// can have the same SCIP symbol string. We use signature_documentation.text to distinguish them.
+pub fn build_call_graph(
+    scip_data: &ScipIndex,
+) -> (HashMap<String, FunctionNode>, HashMap<String, String>) {
     let mut call_graph: HashMap<String, FunctionNode> = HashMap::new();
-    let mut project_function_symbols: HashSet<String> = HashSet::new();
+    let mut project_function_keys: HashSet<String> = HashSet::new();
     let mut all_function_symbols: HashSet<String> = HashSet::new();
     let mut symbol_to_display_name: HashMap<String, String> = HashMap::new();
 
     // Pre-pass: Find where each symbol is DEFINED (symbol_roles == 1)
-    // This is the authoritative source for file paths, not the symbols array
-    let mut symbol_to_def_path: HashMap<String, String> = HashMap::new();
+    // Collect ALL definition occurrences per symbol (there may be multiple for trait impls)
+    // Maps symbol -> Vec<(path, line_number)>
+    let mut symbol_to_definitions: HashMap<String, Vec<(String, i32)>> = HashMap::new();
     for doc in &scip_data.documents {
         let rel_path = doc.relative_path.trim_start_matches('/').to_string();
         for occurrence in &doc.occurrences {
             let is_definition = occurrence.symbol_roles.unwrap_or(0) & 1 == 1;
-            if is_definition {
-                symbol_to_def_path.insert(occurrence.symbol.clone(), rel_path.clone());
+            if is_definition && !occurrence.range.is_empty() {
+                let line = occurrence.range[0];
+                symbol_to_definitions
+                    .entry(occurrence.symbol.clone())
+                    .or_default()
+                    .push((rel_path.clone(), line));
             }
         }
     }
 
-    // First pass: identify all function symbols
+    // Sort definitions by line number for consistent matching with symbol entries
+    for defs in symbol_to_definitions.values_mut() {
+        defs.sort_by_key(|(_, line)| *line);
+    }
+
+    // First pass: identify all function symbols and handle duplicates
+    // Track how many times we've seen each symbol to match with definition order
+    let mut symbol_seen_count: HashMap<String, usize> = HashMap::new();
+
     for doc in &scip_data.documents {
         for symbol in &doc.symbols {
             if is_function_like(symbol.kind) {
-                // Track ALL function symbols (for dependency tracking, including external)
+                let signature = &symbol.signature_documentation.text;
+                let display_name = symbol
+                    .display_name
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string());
+
+                // Track ALL function symbols for dependency tracking
                 all_function_symbols.insert(symbol.symbol.clone());
-                symbol_to_display_name.insert(
-                    symbol.symbol.clone(),
-                    symbol.display_name.clone().unwrap_or_else(|| "unknown".to_string()),
-                );
+                symbol_to_display_name.insert(symbol.symbol.clone(), display_name.clone());
+
+                // Create unique key using signature to handle duplicate symbols
+                let unique_key = make_unique_key(&symbol.symbol, signature);
+
+                // Get the nth definition for this symbol (matching symbol entry order with def order)
+                let def_index = *symbol_seen_count.get(&symbol.symbol).unwrap_or(&0);
+                symbol_seen_count
+                    .entry(symbol.symbol.clone())
+                    .and_modify(|c| *c += 1)
+                    .or_insert(1);
 
                 // Only add to call_graph if DEFINED in this project
-                // External functions should only appear as dependencies, not as entries
-                if let Some(rel_path) = symbol_to_def_path.get(&symbol.symbol) {
-                    project_function_symbols.insert(symbol.symbol.clone());
+                if let Some(defs) = symbol_to_definitions.get(&symbol.symbol) {
+                    if let Some((rel_path, _line)) = defs.get(def_index) {
+                        project_function_keys.insert(unique_key.clone());
 
-                    call_graph.insert(
-                        symbol.symbol.clone(),
-                        FunctionNode {
-                            symbol: symbol.symbol.clone(),
-                            display_name: symbol
-                                .display_name
-                                .clone()
-                                .unwrap_or_else(|| "unknown".to_string()),
-                            relative_path: rel_path.clone(),
-                            callees: HashSet::new(),
-                            range: Vec::new(),
-                        },
-                    );
+                        call_graph.insert(
+                            unique_key,
+                            FunctionNode {
+                                symbol: symbol.symbol.clone(),
+                                display_name,
+                                signature_text: signature.clone(),
+                                relative_path: rel_path.clone(),
+                                callees: HashSet::new(),
+                                range: Vec::new(),
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Build a map from (symbol, line) -> unique_key for occurrence processing
+    let mut symbol_line_to_key: HashMap<(String, i32), String> = HashMap::new();
+    for (key, node) in &call_graph {
+        if let Some(defs) = symbol_to_definitions.get(&node.symbol) {
+            // Find the definition line that matches this node's signature
+            for (idx, node_in_graph) in call_graph.values().enumerate() {
+                if node_in_graph.symbol == node.symbol {
+                    if let Some((_, line)) = defs.get(idx) {
+                        // This is a bit tricky - we need to match by signature
+                        if node_in_graph.signature_text == node.signature_text {
+                            symbol_line_to_key.insert((node.symbol.clone(), *line), key.clone());
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Rebuild the symbol_line_to_key map more correctly
+    symbol_line_to_key.clear();
+    let mut symbol_seen_for_lines: HashMap<String, usize> = HashMap::new();
+    for doc in &scip_data.documents {
+        for symbol in &doc.symbols {
+            if is_function_like(symbol.kind) {
+                let signature = &symbol.signature_documentation.text;
+                let unique_key = make_unique_key(&symbol.symbol, signature);
+
+                if call_graph.contains_key(&unique_key) {
+                    let def_index = *symbol_seen_for_lines.get(&symbol.symbol).unwrap_or(&0);
+                    symbol_seen_for_lines
+                        .entry(symbol.symbol.clone())
+                        .and_modify(|c| *c += 1)
+                        .or_insert(1);
+
+                    if let Some(defs) = symbol_to_definitions.get(&symbol.symbol) {
+                        if let Some((_, line)) = defs.get(def_index) {
+                            symbol_line_to_key.insert((symbol.symbol.clone(), *line), unique_key);
+                        }
+                    }
                 }
             }
         }
@@ -162,7 +244,7 @@ pub fn build_call_graph(scip_data: &ScipIndex) -> (HashMap<String, FunctionNode>
 
     // Second pass: build call relationships and extract ranges
     for doc in &scip_data.documents {
-        let mut current_function: Option<String> = None;
+        let mut current_function_key: Option<String> = None;
 
         let mut ordered_occurrences = doc.occurrences.clone();
         ordered_occurrences.sort_by(|a, b| {
@@ -173,20 +255,31 @@ pub fn build_call_graph(scip_data: &ScipIndex) -> (HashMap<String, FunctionNode>
 
         for occurrence in &ordered_occurrences {
             let is_definition = occurrence.symbol_roles.unwrap_or(0) & 1 == 1;
+            let line = if !occurrence.range.is_empty() {
+                occurrence.range[0]
+            } else {
+                -1
+            };
 
             // Track when we enter a project function definition
-            if is_definition && project_function_symbols.contains(&occurrence.symbol) {
-                current_function = Some(occurrence.symbol.clone());
-                if let Some(node) = call_graph.get_mut(&occurrence.symbol) {
-                    node.range = occurrence.range.clone();
+            if is_definition {
+                // Look up the unique key for this (symbol, line) pair
+                if let Some(key) = symbol_line_to_key.get(&(occurrence.symbol.clone(), line)) {
+                    current_function_key = Some(key.clone());
+                    if let Some(node) = call_graph.get_mut(key) {
+                        node.range = occurrence.range.clone();
+                    }
                 }
             }
 
             // Track ALL function calls (including to external functions)
+            // Note: References use the base symbol, not the unique key
             if !is_definition && all_function_symbols.contains(&occurrence.symbol) {
-                if let Some(caller) = &current_function {
-                    if caller != &occurrence.symbol {
-                        if let Some(caller_node) = call_graph.get_mut(caller) {
+                if let Some(caller_key) = &current_function_key {
+                    if let Some(caller_node) = call_graph.get_mut(caller_key) {
+                        // For callees, we store the base symbol (not unique key)
+                        // since references don't have signature info
+                        if caller_node.symbol != occurrence.symbol {
                             caller_node.callees.insert(occurrence.symbol.clone());
                         }
                     }
@@ -198,41 +291,100 @@ pub fn build_call_graph(scip_data: &ScipIndex) -> (HashMap<String, FunctionNode>
     (call_graph, symbol_to_display_name)
 }
 
-/// Convert symbol to a scip name
-fn symbol_to_scip_name(symbol: &str, display_name: &str) -> String {
+/// Extract type parameter info from a signature for trait impls.
+/// For example, from "fn mul(self, scalar: &Scalar) -> MontgomeryPoint"
+/// extracts the self type and parameter types to help distinguish impls.
+fn extract_impl_type_info(signature: &str) -> Option<String> {
+    // Try to extract the self type and first param type
+    // Pattern: "fn method(self, param: &Type) -> ..."
+    // or "fn method(self: &SelfType, param: &Type) -> ..."
+
+    let signature = signature.trim();
+
+    // Look for the parameter list
+    let params_start = signature.find('(')?;
+    let params_end = signature.find(')')?;
+    let params = &signature[params_start + 1..params_end];
+
+    // Split by comma and look for typed self or first param after self
+    let parts: Vec<&str> = params.split(',').map(|s| s.trim()).collect();
+
+    if parts.len() >= 2 {
+        // Get the type of the second parameter (first after self)
+        let second_param = parts[1];
+        if let Some(colon_pos) = second_param.find(':') {
+            let type_part = second_param[colon_pos + 1..].trim();
+            // Clean up the type (remove & and lifetime annotations)
+            let clean_type = type_part
+                .trim_start_matches('&')
+                .trim_start_matches("'a ")
+                .trim_start_matches("'_ ")
+                .trim();
+            return Some(clean_type.to_string());
+        }
+    }
+
+    None
+}
+
+/// Convert symbol to a scip name, optionally including type info for disambiguation
+fn symbol_to_scip_name(symbol: &str, display_name: &str, signature: Option<&str>) -> String {
     // Step 1: Strip "rust-analyzer cargo " prefix
     let s = symbol
         .strip_prefix("rust-analyzer cargo ")
         .unwrap_or_else(|| {
-            panic!("Symbol does not start with 'rust-analyzer cargo ': {}", symbol)
+            panic!(
+                "Symbol does not start with 'rust-analyzer cargo ': {}",
+                symbol
+            )
         });
 
     // Step 2 & 3: Check if s ends with "display_name()."
     let expected_suffix = format!("{}().", display_name);
 
     if !s.ends_with(&expected_suffix) {
-        panic!(
-            "Symbol does not end with '{}': {}",
-            expected_suffix, symbol
-        );
+        panic!("Symbol does not end with '{}': {}", expected_suffix, symbol);
     }
 
-    // Delete the last character of s and return it
-    s[..s.len() - 1].to_string()
+    // Delete the last character of s
+    let mut result = s[..s.len() - 1].to_string();
+
+    // If we have a signature, try to add type info for disambiguation
+    // This helps distinguish e.g., Mul<&Scalar>::mul vs Mul<&MontgomeryPoint>::mul
+    if let Some(sig) = signature {
+        if let Some(type_info) = extract_impl_type_info(sig) {
+            // Check if this looks like a trait method (contains #)
+            // e.g., "4.1.3 montgomery/Mul#mul()"
+            if result.contains('#') {
+                // Insert the type parameter before the #
+                // "montgomery/Mul#mul()" -> "montgomery/Mul<Scalar>#mul()"
+                if let Some(hash_pos) = result.rfind('#') {
+                    result = format!(
+                        "{}<{}>{}",
+                        &result[..hash_pos],
+                        type_info,
+                        &result[hash_pos..]
+                    );
+                }
+            }
+        }
+    }
+
+    result
 }
 
 /// Convert symbol to a path format with specified separator
 fn symbol_to_path_with_sep(symbol: &str, display_name: &str, sep: &str) -> String {
     let mut s = symbol;
     let mut crate_name = String::new();
-    
+
     // Skip "rust-analyzer cargo " prefix and extract crate name
     if let Some(rest) = symbol.strip_prefix("rust-analyzer cargo ") {
         s = rest;
         // Extract crate name (everything before the first space, which precedes the version)
         if let Some(space_pos) = s.find(' ') {
             crate_name = s[..space_pos].replace('-', "_");
-            s = &s[space_pos + 1..];  // Move past crate name
+            s = &s[space_pos + 1..]; // Move past crate name
         }
     }
 
@@ -263,7 +415,9 @@ fn symbol_to_path_with_sep(symbol: &str, display_name: &str, sep: &str) -> Strin
     clean_path = re.replace_all(&clean_path, "").to_string();
 
     // Clean up leading/trailing separators
-    clean_path = clean_path.trim_matches(&sep.chars().collect::<Vec<_>>()[..]).to_string();
+    clean_path = clean_path
+        .trim_matches(&sep.chars().collect::<Vec<_>>()[..])
+        .to_string();
 
     // Add crate name prefix if we have one and it's not already there
     if !crate_name.is_empty() && !clean_path.starts_with(&crate_name) {
@@ -344,8 +498,9 @@ fn convert_to_atoms_with_lines_internal(
                     .map(|n| n.display_name.clone())
                     .or_else(|| symbol_to_display_name.get(callee).cloned())
                     .unwrap_or_else(|| "unknown".to_string());
-                
-                let dep_path = symbol_to_scip_name(callee, &display_name);
+
+                // For dependencies, we don't have signature info (they're just references)
+                let dep_path = symbol_to_scip_name(callee, &display_name, None);
                 dependencies.insert(dep_path);
             }
 
@@ -375,7 +530,12 @@ fn convert_to_atoms_with_lines_internal(
 
             AtomWithLines {
                 display_name: node.display_name.clone(),
-                scip_name: symbol_to_scip_name(&node.symbol, &node.display_name),
+                // Include signature info for the scip_name to disambiguate trait impls
+                scip_name: symbol_to_scip_name(
+                    &node.symbol,
+                    &node.display_name,
+                    Some(&node.signature_text),
+                ),
                 dependencies,
                 code_path: node.relative_path.clone(),
                 code_text: CodeTextInfo {
@@ -386,4 +546,3 @@ fn convert_to_atoms_with_lines_internal(
         })
         .collect()
 }
-

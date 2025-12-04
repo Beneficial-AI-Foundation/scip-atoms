@@ -41,7 +41,7 @@ fn main() {
 
     // Check prerequisites
     println!("Checking prerequisites...");
-    
+
     if !check_command_exists("verus-analyzer") {
         eprintln!("✗ Error: verus-analyzer not found in PATH");
         eprintln!("  Install with: rustup component add verus-analyzer");
@@ -62,31 +62,40 @@ fn main() {
         eprintln!("✗ Error: Project path does not exist: {}", project_path);
         std::process::exit(1);
     }
-    
+
     // Check if it's a valid Rust project
     let cargo_toml = project_path_buf.join("Cargo.toml");
     if !cargo_toml.exists() {
-        eprintln!("✗ Error: Not a valid Rust project (Cargo.toml not found): {}", project_path);
+        eprintln!(
+            "✗ Error: Not a valid Rust project (Cargo.toml not found): {}",
+            project_path
+        );
         std::process::exit(1);
     }
     println!("  ✓ Valid Rust project found");
     println!();
 
     // Step 1: Run verus-analyzer scip
-    println!("Step 1/4: Running verus-analyzer scip on {}...", project_path);
+    println!(
+        "Step 1/4: Running verus-analyzer scip on {}...",
+        project_path
+    );
     println!("  (This may take a while for large projects)");
-    
+
     let scip_status = Command::new("verus-analyzer")
         .args(["scip", "."])
         .current_dir(&project_path_buf)
         .status();
-    
+
     match scip_status {
         Ok(status) if status.success() => {
             println!("  ✓ SCIP index generated successfully");
         }
         Ok(status) => {
-            eprintln!("✗ Error: verus-analyzer scip failed with status: {}", status);
+            eprintln!(
+                "✗ Error: verus-analyzer scip failed with status: {}",
+                status
+            );
             eprintln!("  Make sure the project compiles successfully first");
             std::process::exit(1);
         }
@@ -98,7 +107,10 @@ fn main() {
 
     let index_scip_path = project_path_buf.join("index.scip");
     if !index_scip_path.exists() {
-        eprintln!("✗ Error: index.scip not found at {}", index_scip_path.display());
+        eprintln!(
+            "✗ Error: index.scip not found at {}",
+            index_scip_path.display()
+        );
         eprintln!("  verus-analyzer scip may have failed silently");
         std::process::exit(1);
     }
@@ -107,21 +119,16 @@ fn main() {
 
     // Step 2: Convert SCIP to JSON
     println!("Step 2/4: Converting index.scip to JSON...");
-    
+
     let temp_json_path = project_path_buf.join("index.scip.json");
-    
+
     let scip_output = Command::new("scip")
-        .args([
-            "print",
-            "--json",
-            index_scip_path.to_str().unwrap(),
-        ])
+        .args(["print", "--json", index_scip_path.to_str().unwrap()])
         .output();
 
     match scip_output {
         Ok(output) if output.status.success() => {
-            std::fs::write(&temp_json_path, output.stdout)
-                .expect("Failed to write SCIP JSON file");
+            std::fs::write(&temp_json_path, output.stdout).expect("Failed to write SCIP JSON file");
             println!("  ✓ SCIP JSON generated at {}", temp_json_path.display());
         }
         Ok(output) => {
@@ -140,7 +147,7 @@ fn main() {
 
     // Step 3: Parse SCIP JSON and build call graph
     println!("Step 3/4: Parsing SCIP JSON and building call graph...");
-    
+
     let scip_index = match parse_scip_json(temp_json_path.to_str().unwrap()) {
         Ok(idx) => idx,
         Err(e) => {
@@ -156,8 +163,9 @@ fn main() {
     // Step 4: Convert to atoms format with line numbers
     println!("Step 4/4: Converting to atoms format with accurate line numbers...");
     println!("  Parsing source files with verus_syn for accurate function spans...");
-    
-    let atoms = convert_to_atoms_with_parsed_spans(&call_graph, &symbol_to_display_name, &project_path_buf);
+
+    let atoms =
+        convert_to_atoms_with_parsed_spans(&call_graph, &symbol_to_display_name, &project_path_buf);
     println!("  ✓ Converted {} functions to atoms format", atoms.len());
 
     // Write the output
@@ -173,8 +181,10 @@ fn main() {
     println!();
     println!("Summary:");
     println!("  - Total functions: {}", atoms.len());
-    println!("  - Total dependencies: {}", 
-             atoms.iter().map(|a| a.dependencies.len()).sum::<usize>());
+    println!(
+        "  - Total dependencies: {}",
+        atoms.iter().map(|a| a.dependencies.len()).sum::<usize>()
+    );
     println!("  - Output format: atoms with line numbers and visibility flags");
     println!();
 
@@ -184,6 +194,3 @@ fn main() {
         println!("Cleaned up temporary file: {}", temp_json_path.display());
     }
 }
-
-
-

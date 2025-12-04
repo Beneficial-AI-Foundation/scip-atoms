@@ -188,7 +188,11 @@ pub fn get_function_end_line(
     start_line: usize,
 ) -> Option<usize> {
     // Try exact match first
-    let key = (relative_path.to_string(), function_name.to_string(), start_line);
+    let key = (
+        relative_path.to_string(),
+        function_name.to_string(),
+        start_line,
+    );
     if let Some(&end_line) = span_map.get(&key) {
         return Some(end_line);
     }
@@ -198,7 +202,7 @@ pub fn get_function_end_line(
     // We use 15 lines to account for doc comments which are included in the
     // function's span by the parser, but SCIP points to the signature line.
     const TOLERANCE: usize = 15;
-    
+
     for ((path, name, parsed_start), &end_line) in span_map.iter() {
         if path == relative_path && name == function_name {
             let diff = if *parsed_start > start_line {
@@ -206,7 +210,7 @@ pub fn get_function_end_line(
             } else {
                 start_line - parsed_start
             };
-            
+
             if diff <= TOLERANCE {
                 return Some(end_line);
             }
@@ -243,10 +247,9 @@ fn another_function(x: i32) -> i32 {{
         assert_eq!(spans.len(), 2);
         assert_eq!(spans[0].name, "hello_world");
         assert_eq!(spans[1].name, "another_function");
-        
+
         // End lines should be after start lines
         assert!(spans[0].end_line >= spans[0].start_line);
         assert!(spans[1].end_line >= spans[1].start_line);
     }
 }
-
