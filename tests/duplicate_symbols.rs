@@ -70,21 +70,27 @@ fn test_scip_names_include_type_info() {
     let (call_graph, symbol_to_display_name) = build_call_graph(&scip_data);
     let atoms = convert_to_atoms_with_lines(&call_graph, &symbol_to_display_name);
 
+    // With the self_type repair, the format is now:
+    // montgomery/MontgomeryPoint#Mul<Scalar>#mul() and montgomery/Scalar#Mul<MontgomeryPoint>#mul()
+    // Look for atoms that contain both the Mul trait and mul method
     let mul_atoms: Vec<_> = atoms
         .iter()
-        .filter(|a| a.scip_name.contains("montgomery/Mul") && a.scip_name.contains("#mul"))
+        .filter(|a| a.scip_name.contains("Mul") && a.scip_name.contains("#mul"))
+        .filter(|a| a.scip_name.contains("montgomery/"))
         .collect();
 
     // Should have at least 2 distinct Mul implementations
     assert!(
         mul_atoms.len() >= 2,
-        "Expected at least 2 montgomery/Mul atoms, found {}",
-        mul_atoms.len()
+        "Expected at least 2 montgomery Mul atoms, found {}. Atoms: {:?}",
+        mul_atoms.len(),
+        mul_atoms.iter().map(|a| &a.scip_name).collect::<Vec<_>>()
     );
 
     // The scip_names should include type parameters to distinguish them
     let scip_names: Vec<_> = mul_atoms.iter().map(|a| a.scip_name.as_str()).collect();
 
+    // Check that type parameters are present for disambiguation
     assert!(
         scip_names.iter().any(|s| s.contains("Mul<Scalar>")),
         "Expected scip_name with Mul<Scalar>, got: {:?}",
@@ -95,6 +101,18 @@ fn test_scip_names_include_type_info() {
             .iter()
             .any(|s| s.contains("Mul<MontgomeryPoint>")),
         "Expected scip_name with Mul<MontgomeryPoint>, got: {:?}",
+        scip_names
+    );
+
+    // With the new self_type repair, symbols should also include the Self type
+    // e.g., montgomery/MontgomeryPoint#Mul<Scalar>#mul()
+    // Check that at least one has the Self type in the path
+    let has_self_type = scip_names
+        .iter()
+        .any(|s| s.contains("MontgomeryPoint#Mul") || s.contains("Scalar#Mul"));
+    assert!(
+        has_self_type,
+        "Expected self_type in scip_name (e.g., MontgomeryPoint#Mul), got: {:?}",
         scip_names
     );
 }

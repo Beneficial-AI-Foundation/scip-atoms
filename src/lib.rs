@@ -70,6 +70,10 @@ pub struct FunctionNode {
     pub relative_path: String,
     pub callees: HashSet<String>,
     pub range: Vec<i32>,
+    /// The Self type for trait implementations, extracted from the `method().(self)` symbol.
+    /// Used to repair verus-analyzer's inconsistent symbol format.
+    /// e.g., "MontgomeryPoint" from "self: &MontgomeryPoint"
+    pub self_type: Option<String>,
 }
 
 /// Output format: Atom with line numbers
@@ -148,6 +152,34 @@ pub fn build_call_graph(
         defs.sort_by_key(|(_, line)| *line);
     }
 
+    // Pre-pass: Collect self_type from `method().(self)` symbols
+    // These have enclosing_symbol set and display_name == "self"
+    // Since multiple trait impls can have the same symbol (verus-analyzer bug),
+    // we collect all self_types per enclosing_symbol in order.
+    // Maps enclosing_symbol -> Vec<self_type>
+    let mut enclosing_to_self_types: HashMap<String, Vec<String>> = HashMap::new();
+    for doc in &scip_data.documents {
+        for symbol in &doc.symbols {
+            // Look for self parameter symbols (display_name == "self" and has enclosing_symbol)
+            if let Some(ref display_name) = symbol.display_name {
+                if display_name == "self" {
+                    if let Some(ref enclosing) = symbol.enclosing_symbol {
+                        let self_sig = &symbol.signature_documentation.text;
+                        if let Some(self_type) = extract_self_type(self_sig) {
+                            enclosing_to_self_types
+                                .entry(enclosing.clone())
+                                .or_default()
+                                .push(self_type);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Track how many times we've seen each symbol to pick the right self_type
+    let mut symbol_self_type_idx: HashMap<String, usize> = HashMap::new();
+
     // First pass: identify all function symbols and handle duplicates
     // Track how many times we've seen each symbol to match with definition order
     let mut symbol_seen_count: HashMap<String, usize> = HashMap::new();
@@ -175,6 +207,20 @@ pub fn build_call_graph(
                     .and_modify(|c| *c += 1)
                     .or_insert(1);
 
+                // Look up self_type from the pre-collected map
+                // Use the index to handle multiple impls with the same symbol
+                let self_type =
+                    if let Some(self_types) = enclosing_to_self_types.get(&symbol.symbol) {
+                        let idx = *symbol_self_type_idx.get(&symbol.symbol).unwrap_or(&0);
+                        symbol_self_type_idx
+                            .entry(symbol.symbol.clone())
+                            .and_modify(|i| *i += 1)
+                            .or_insert(1);
+                        self_types.get(idx).cloned()
+                    } else {
+                        None
+                    };
+
                 // Only add to call_graph if DEFINED in this project
                 if let Some(defs) = symbol_to_definitions.get(&symbol.symbol) {
                     if let Some((rel_path, _line)) = defs.get(def_index) {
@@ -189,6 +235,7 @@ pub fn build_call_graph(
                                 relative_path: rel_path.clone(),
                                 callees: HashSet::new(),
                                 range: Vec::new(),
+                                self_type,
                             },
                         );
                     }
@@ -327,8 +374,75 @@ fn extract_impl_type_info(signature: &str) -> Option<String> {
     None
 }
 
-/// Convert symbol to a scip name, optionally including type info for disambiguation
-fn symbol_to_scip_name(symbol: &str, display_name: &str, signature: Option<&str>) -> String {
+/// Extract the Self type from a self parameter signature.
+/// For example, from "self: &MontgomeryPoint" extracts "&MontgomeryPoint".
+/// From "self: Scalar" extracts "Scalar".
+/// Preserves the `&` to distinguish owned vs reference implementations,
+/// matching rust-analyzer's behavior.
+fn extract_self_type(self_signature: &str) -> Option<String> {
+    // Pattern: "self: &Type" or "self: &'a Type" or "self: Type"
+    let self_signature = self_signature.trim();
+
+    if let Some(colon_pos) = self_signature.find(':') {
+        let type_part = self_signature[colon_pos + 1..].trim();
+
+        // Check if it's a reference type
+        let is_ref = type_part.starts_with('&');
+
+        // Remove lifetime annotations but preserve the & if present
+        let clean_type = type_part
+            .trim_start_matches('&')
+            .trim_start_matches("'a ")
+            .trim_start_matches("'b ")
+            .trim_start_matches("'_ ")
+            .trim();
+
+        if !clean_type.is_empty() {
+            // Re-add the & if it was a reference type
+            if is_ref {
+                return Some(format!("&{}", clean_type));
+            } else {
+                return Some(clean_type.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+/// Check if a symbol path is missing the Self type (verus-analyzer inconsistency).
+/// verus-analyzer produces "module/Trait#method()" for reference Self types,
+/// but "module/Type#Trait#method()" for owned Self types.
+/// This function detects the former pattern.
+fn is_missing_self_type(symbol: &str) -> bool {
+    // Pattern for missing Self type: "module/Trait#method()" where Trait is capitalized
+    // Pattern for present Self type: "module/Type#Trait#method()" has two # separators
+
+    // Count the number of # in the symbol
+    let hash_count = symbol.matches('#').count();
+
+    // If there's only one #, and it's followed by a method name, Self type is likely missing
+    // e.g., "montgomery/Mul#mul()" vs "montgomery/MontgomeryPoint#Mul#mul()"
+    hash_count == 1
+}
+
+/// Convert symbol to a scip name, optionally including type info for disambiguation.
+///
+/// Parameters:
+/// - `symbol`: The raw SCIP symbol string
+/// - `display_name`: The function/method name
+/// - `signature`: Optional function signature (e.g., "fn mul(self, scalar: &Scalar) -> MontgomeryPoint")
+/// - `self_type`: Optional Self type extracted from the self parameter (e.g., "MontgomeryPoint")
+///
+/// This function repairs verus-analyzer's inconsistent symbol format by:
+/// 1. Adding trait type parameters (e.g., Mul -> Mul<Scalar>) for disambiguation
+/// 2. Adding the Self type when missing (e.g., montgomery/Mul#mul -> montgomery/MontgomeryPoint#Mul#mul)
+fn symbol_to_scip_name(
+    symbol: &str,
+    display_name: &str,
+    signature: Option<&str>,
+    self_type: Option<&str>,
+) -> String {
     // Step 1: Strip "rust-analyzer cargo " prefix
     let s = symbol
         .strip_prefix("rust-analyzer cargo ")
@@ -366,6 +480,22 @@ fn symbol_to_scip_name(symbol: &str, display_name: &str, signature: Option<&str>
                         &result[hash_pos..]
                     );
                 }
+            }
+        }
+    }
+
+    // If Self type is provided and the symbol is missing it (verus-analyzer inconsistency),
+    // insert the Self type to make it consistent with rust-analyzer format.
+    // e.g., "montgomery/Mul<Scalar>#mul()" -> "montgomery/MontgomeryPoint#Mul<Scalar>#mul()"
+    if let Some(self_t) = self_type {
+        if is_missing_self_type(&result) {
+            // Find the position after "module/" to insert the Self type
+            // Pattern: "version module/Trait#method()" or "version module/Trait<T>#method()"
+            if let Some(slash_pos) = result.rfind('/') {
+                // Insert Self type after the slash, before the trait
+                let before_slash = &result[..=slash_pos];
+                let after_slash = &result[slash_pos + 1..];
+                result = format!("{}{}#{}", before_slash, self_t, after_slash);
             }
         }
     }
@@ -500,7 +630,7 @@ fn convert_to_atoms_with_lines_internal(
                     .unwrap_or_else(|| "unknown".to_string());
 
                 // For dependencies, we don't have signature info (they're just references)
-                let dep_path = symbol_to_scip_name(callee, &display_name, None);
+                let dep_path = symbol_to_scip_name(callee, &display_name, None, None);
                 dependencies.insert(dep_path);
             }
 
@@ -530,11 +660,12 @@ fn convert_to_atoms_with_lines_internal(
 
             AtomWithLines {
                 display_name: node.display_name.clone(),
-                // Include signature info for the scip_name to disambiguate trait impls
+                // Include signature info and self_type to repair verus-analyzer's inconsistent symbols
                 scip_name: symbol_to_scip_name(
                     &node.symbol,
                     &node.display_name,
                     Some(&node.signature_text),
+                    node.self_type.as_deref(),
                 ),
                 dependencies,
                 code_path: node.relative_path.clone(),
