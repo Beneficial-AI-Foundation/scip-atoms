@@ -180,7 +180,7 @@ pub fn build_function_span_map(
 /// Get the end line for a function given its path, name, and start line.
 ///
 /// If we can't find an exact match, we try to find a function with the same name
-/// whose start line is close to the given start line (within a small tolerance).
+/// where the SCIP-reported start line falls within the parsed span.
 pub fn get_function_end_line(
     span_map: &HashMap<(String, String, usize), usize>,
     relative_path: &str,
@@ -197,21 +197,14 @@ pub fn get_function_end_line(
         return Some(end_line);
     }
 
-    // Try fuzzy match: find a function with the same name in the same file
-    // whose start line is within tolerance of our start line.
-    // We use 15 lines to account for doc comments which are included in the
-    // function's span by the parser, but SCIP points to the signature line.
-    const TOLERANCE: usize = 15;
-
+    // Try containment match: find a function with the same name in the same file
+    // where the SCIP start_line falls within the parsed span [parsed_start, end_line].
+    // This works because verus_syn includes attributes/docs in the span, so the
+    // actual signature line (what SCIP reports) should be within that span.
     for ((path, name, parsed_start), &end_line) in span_map.iter() {
         if path == relative_path && name == function_name {
-            let diff = if *parsed_start > start_line {
-                parsed_start - start_line
-            } else {
-                start_line - parsed_start
-            };
-
-            if diff <= TOLERANCE {
+            // SCIP's start_line should be within [parsed_start, end_line]
+            if start_line >= *parsed_start && start_line <= end_line {
                 return Some(end_line);
             }
         }
