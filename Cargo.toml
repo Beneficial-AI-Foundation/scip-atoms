@@ -22,6 +22,7 @@ quote = "1.0"
 
 [dev-dependencies]
 tempfile = "3.10"
+ureq = "2.9"
 
 [profile.release]
 lto = true

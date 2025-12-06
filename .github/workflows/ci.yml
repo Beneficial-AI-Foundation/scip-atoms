@@ -106,6 +106,9 @@ jobs:
       - name: Run integration tests
         run: cargo test --test duplicate_symbols --verbose
       
+      - name: Run function coverage test
+        run: cargo test --test function_coverage --verbose -- --nocapture
+      
       - name: Upload SCIP artifacts (on failure)
         if: failure()
         uses: actions/upload-artifact@v4
