@@ -140,7 +140,47 @@ This bug affects any crate with multiple trait implementations of the same metho
 - `From`/`Into` implementations
 - Any generic trait impl with the same method name
 
-The fix will ensure all such implementations are captured in the output.
+The fix ensures all such implementations are captured in the output.
+
+## Implementation Details
+
+### Level 1: Type Parameter Extraction
+
+For binary ops like `Mul<T>`, extract the type parameter from the second argument:
+- `fn mul(self, scalar: &Scalar)` → adds `<&Scalar>` to the trait name
+
+For `From<T>`, extract from the first (and only) parameter:
+- `fn from(value: EdwardsPoint)` → adds `<EdwardsPoint>` to the trait name
+
+The `&` is preserved to distinguish `impl From<&T>` from `impl From<T>`.
+
+### Level 2: Self Type Insertion
+
+When rust-analyzer omits the Self type from the symbol path (common for reference Self types),
+we extract it from the `self` parameter's signature and insert it:
+- `montgomery/Mul#mul()` → `montgomery/&MontgomeryPoint#Mul<&Scalar>#mul()`
+
+### Level 3: Line Number Suffix (Last Resort)
+
+For cases where symbol+signature are identical (e.g., generic impls that differ only in
+type parameters not visible in the signature), we add a line number suffix:
+- `window/LookupTable#From<&EdwardsPoint>#from()` becomes
+- `window/LookupTable#From<&EdwardsPoint>#from()@345` and
+- `window/LookupTable#From<&EdwardsPoint>#from()@436`
+
+This handles edge cases like:
+```rust
+impl<'a> From<&'a EdwardsPoint> for LookupTable<AffineNielsPoint> { ... }  // line 345
+impl<'a> From<&'a EdwardsPoint> for LookupTable<ProjectiveNielsPoint> { ... }  // line 436
+```
+
+### Duplicate Detection
+
+The tool now includes a `find_duplicate_scip_names()` function that can detect any
+remaining duplicates in the output. This is used in `main.rs` to print warnings when
+duplicates are detected, helping identify edge cases that may need additional handling.
+
+
 
 
 

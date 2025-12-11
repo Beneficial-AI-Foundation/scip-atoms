@@ -1,4 +1,7 @@
-use scip_atoms::{build_call_graph, convert_to_atoms_with_parsed_spans, parse_scip_json};
+use scip_atoms::{
+    build_call_graph, convert_to_atoms_with_parsed_spans, find_duplicate_scip_names,
+    parse_scip_json,
+};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -232,6 +235,29 @@ fn main() {
     let atoms =
         convert_to_atoms_with_parsed_spans(&call_graph, &symbol_to_display_name, &project_path_buf);
     println!("  ✓ Converted {} functions to atoms format", atoms.len());
+
+    // Check for duplicate scip_names
+    let duplicates = find_duplicate_scip_names(&atoms);
+    if !duplicates.is_empty() {
+        println!();
+        println!(
+            "  ⚠ WARNING: Found {} duplicate scip_name(s):",
+            duplicates.len()
+        );
+        for dup in &duplicates {
+            println!("    - '{}'", dup.scip_name);
+            for occ in &dup.occurrences {
+                println!(
+                    "      at {}:{} ({})",
+                    occ.code_path, occ.lines_start, occ.display_name
+                );
+            }
+        }
+        println!();
+        println!("    Duplicate scip_names may indicate trait implementations that");
+        println!("    cannot be distinguished. Consider filing an issue if this is");
+        println!("    causing problems with downstream tools.");
+    }
 
     // Write the output
     let json = serde_json::to_string_pretty(&atoms).expect("Failed to serialize JSON");

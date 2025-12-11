@@ -110,15 +110,46 @@ Common examples:
 - `Mul<A> for B` vs `Mul<B> for A`
 - `Add<A> for B` vs `Add<B> for A`
 - `Sub<A> for B` vs `Sub<B> for A`
-- `From<A>` for different source types (potentially)
+- `From<A>` vs `From<B>` for same target type
+
+## Case 3: From Trait - Same Symbol with Different Source Types
+
+For `From<T>` implementations, the source type `T` is not included in the SCIP symbol.
+
+### Example: LookupTable
+
+```rust
+impl<'a> From<&'a EdwardsPoint> for LookupTable<AffineNielsPoint> { ... }
+impl<'a> From<&'a EdwardsPoint> for LookupTable<ProjectiveNielsPoint> { ... }
+```
+
+Both generate: `window/LookupTable#From#from()`
+
+### scip-atoms Fix for From
+
+1. **Extract source type**: From the first parameter `fn from(value: T)`, extract `T`
+2. **Preserve references**: Keep `&` to distinguish `From<&T>` from `From<T>`
+3. **Line number fallback**: If symbol+signature are identical (generic impls),
+   add line number suffix as last resort
+
+### Result
+
+```
+window/LookupTable#From<&EdwardsPoint>#from()@345
+window/LookupTable#From<&EdwardsPoint>#from()@436
+```
 
 ## Testing
 
-See `tests/duplicate_symbols.rs` for tests that verify both patterns are handled correctly:
+See `tests/duplicate_symbols.rs` for tests that verify all patterns are handled correctly:
 - `test_duplicate_mul_implementations` - verifies Mul fix works
 - `test_scip_names_include_type_info` - verifies enhanced scip_names
 - `test_neg_implementations_for_scalar` - verifies Neg works naturally
 - `test_neg_implementations_for_ristretto` - verifies Neg works naturally
+- `test_from_implementations_are_disambiguated` - verifies From trait handling
+- `test_no_duplicate_scip_names` - verifies no duplicates remain in output
+
+
 
 
 

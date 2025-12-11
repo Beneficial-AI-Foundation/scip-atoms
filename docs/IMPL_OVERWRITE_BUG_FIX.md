@@ -133,3 +133,5 @@ See `tests/duplicate_symbols.rs`:
 - `docs/SCIP_SYMBOL_FORMAT_COMPARISON.md` - rust-analyzer vs verus-analyzer differences
 
 
+
+
