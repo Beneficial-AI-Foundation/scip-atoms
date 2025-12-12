@@ -5,11 +5,131 @@
 //! Ported from the Python find_verus_functions_syn.py script.
 
 use regex::Regex;
+use rust_lapper::{Interval, Lapper};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
+
+/// Function metadata stored in the interval tree
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FunctionInterval {
+    pub name: String,
+    pub file: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub has_trusted_assumption: bool,
+}
+
+/// Interval type for rust-lapper (uses usize for start/stop)
+type FuncInterval = Interval<usize, FunctionInterval>;
+
+/// Efficient function index using interval trees for O(log n) lookups
+///
+/// Instead of linear scans, this uses rust-lapper to efficiently query
+/// which function contains a given line number.
+struct FunctionIndex {
+    /// Map from normalized file path to interval tree of functions
+    trees: HashMap<String, Lapper<usize, FunctionInterval>>,
+    /// All files we know about (for fuzzy path matching)
+    known_files: Vec<String>,
+}
+
+impl FunctionIndex {
+    /// Build a function index from parsed function info
+    pub fn from_functions(functions: &[crate::verus_parser::FunctionInfo]) -> Self {
+        let mut intervals_by_file: HashMap<String, Vec<FuncInterval>> = HashMap::new();
+
+        for func in functions {
+            let file_path = func.file.clone().unwrap_or_default();
+            if file_path.is_empty() {
+                continue;
+            }
+
+            let interval = Interval {
+                start: func.start_line,
+                stop: func.end_line + 1, // rust-lapper uses half-open intervals [start, stop)
+                val: FunctionInterval {
+                    name: func.name.clone(),
+                    file: file_path.clone(),
+                    start_line: func.start_line,
+                    end_line: func.end_line,
+                    has_trusted_assumption: func.has_trusted_assumption,
+                },
+            };
+
+            intervals_by_file
+                .entry(file_path)
+                .or_default()
+                .push(interval);
+        }
+
+        let mut trees = HashMap::new();
+        let mut known_files = Vec::new();
+
+        for (file, intervals) in intervals_by_file {
+            known_files.push(file.clone());
+            trees.insert(file, Lapper::new(intervals));
+        }
+
+        Self { trees, known_files }
+    }
+
+    /// Find the function containing the given line in the given file
+    ///
+    /// Returns the function info if found, handling fuzzy path matching
+    /// (exact > suffix > filename-only).
+    pub fn find_at_line(&self, file_path: &str, line: usize) -> Option<&FunctionInterval> {
+        // Find the best matching file
+        let matching_file = self.find_matching_file(file_path)?;
+
+        // Query the interval tree - O(log n)
+        let tree = self.trees.get(matching_file)?;
+        let mut results: Vec<_> = tree.find(line, line + 1).collect();
+
+        // If multiple functions contain this line (nested), return the innermost
+        // (smallest span)
+        results.sort_by_key(|iv| iv.stop - iv.start);
+        results.first().map(|iv| &iv.val)
+    }
+
+    /// Find the best matching file path with priority: exact > suffix > filename-only
+    fn find_matching_file(&self, query_path: &str) -> Option<&String> {
+        let query = std::path::Path::new(query_path);
+        let query_str = query.to_string_lossy();
+
+        let mut best_match: Option<&String> = None;
+        let mut best_score = 0; // 0=none, 1=filename, 2=suffix, 3=exact
+
+        for file_key in &self.known_files {
+            let key_path = std::path::Path::new(file_key);
+            let key_str = key_path.to_string_lossy();
+
+            // Exact match (highest priority)
+            if query == key_path {
+                return Some(file_key); // Can't do better
+            }
+
+            // Suffix match (high priority)
+            if query_str.ends_with(&*key_str) || key_str.ends_with(&*query_str) {
+                if best_score < 2 {
+                    best_match = Some(file_key);
+                    best_score = 2;
+                }
+                continue;
+            }
+
+            // Filename-only match (lowest priority)
+            if best_score < 1 && query.file_name() == key_path.file_name() {
+                best_match = Some(file_key);
+                best_score = 1;
+            }
+        }
+
+        best_match
+    }
+}
 
 /// A compilation or verification error
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -758,17 +878,11 @@ impl VerificationAnalyzer {
             .functions
             .iter()
             .filter(|f| f.has_requires || f.has_ensures)
+            .cloned()
             .collect();
 
-        // Build lookup structures for error matching
-        let mut all_functions_with_lines: HashMap<String, Vec<(String, usize)>> = HashMap::new();
-        for func in &verifiable_functions {
-            let file_path = func.file.clone().unwrap_or_default();
-            all_functions_with_lines
-                .entry(file_path)
-                .or_default()
-                .push((func.name.clone(), func.start_line));
-        }
+        // Build interval tree index for O(log n) lookups
+        let function_index = FunctionIndex::from_functions(&verifiable_functions);
 
         // Parse verification errors from content
         let errors_by_file = self
@@ -784,28 +898,14 @@ impl VerificationAnalyzer {
         let mut failed_function_keys: std::collections::HashSet<(String, String, usize)> =
             std::collections::HashSet::new();
 
-        // Helper closure to mark a function as failed
+        // Helper closure to mark a function as failed - now uses O(log n) interval tree lookup
         let mut mark_failed = |error_file: &str, error_line: i32| {
-            if let Some(failed_func) = self.verification_parser.find_function_at_line(
-                error_file,
-                error_line,
-                &all_functions_with_lines,
-            ) {
-                // Find the specific function that contains this error
-                for func in &verifiable_functions {
-                    let file_path = func.file.as_deref().unwrap_or("");
-                    if (file_path.ends_with(error_file) || error_file.ends_with(file_path))
-                        && func.name == failed_func
-                        && func.start_line <= error_line as usize
-                        && error_line as usize <= func.end_line
-                    {
-                        failed_function_keys.insert((
-                            func.name.clone(),
-                            file_path.to_string(),
-                            func.start_line,
-                        ));
-                    }
-                }
+            if let Some(func_info) = function_index.find_at_line(error_file, error_line as usize) {
+                failed_function_keys.insert((
+                    func_info.name.clone(),
+                    func_info.file.clone(),
+                    func_info.start_line,
+                ));
             }
         };
 

@@ -287,18 +287,12 @@ project_path ──▶ verus_parser::parse_all_functions
                     ParsedOutput { functions: [...] }
 
 
-Step 3: Build lookup structures
-───────────────────────────────
-ParsedOutput ──▶ Build 3 data structures:
+Step 3: Build interval tree index
+─────────────────────────────────
+ParsedOutput ──▶ FunctionIndex (rust-lapper interval tree)
                     │
-                    ├─▶ function_locations: HashMap<name, Vec<FunctionLocation>>
-                    │      (for building output)
-                    │
-                    ├─▶ all_functions_with_lines: HashMap<file, Vec<(name, line)>>
-                    │      (for error→function mapping)
-                    │
-                    └─▶ all_function_names: HashSet<String>
-                           (for tracking verified vs failed)
+                    └─▶ Per-file interval trees for O(log n) lookups
+                         Map: file → Lapper<(start, end) → FunctionInterval>
 
 
 Step 4: Parse verification errors
@@ -310,15 +304,15 @@ verification_output ──▶ VerificationParser
                               └─▶ verification_failures: Vec<VerificationFailure>
 
 
-Step 5: Map errors to functions
-───────────────────────────────
+Step 5: Map errors to functions (O(log n) per error)
+────────────────────────────────────────────────────
 For each (file, line) in errors:
     │
     ▼
-find_function_at_line(file, line, all_functions_with_lines)
+FunctionIndex.find_at_line(file, line)  ──▶ O(log n) interval tree query
     │
     ▼
-Mark function as failed, record specific location
+Mark function as failed
 
 
 Step 6: Build output
@@ -386,42 +380,46 @@ on every instantiation.
 
 ---
 
-## Proposed Simplified Architecture
+## Implemented Optimizations
+
+### ✅ Interval Tree for Error→Function Mapping
+
+Previously, mapping errors to functions required O(n) linear scans. Now uses
+`rust-lapper` interval trees for O(log n) lookups:
+
+```rust
+// FunctionIndex: per-file interval trees
+struct FunctionIndex {
+    trees: HashMap<String, Lapper<usize, FunctionInterval>>,
+}
+
+// O(log n) lookup
+fn find_at_line(&self, file: &str, line: usize) -> Option<&FunctionInterval>
+```
+
+---
+
+## Remaining Potential Optimizations
+
+### 1. Regex Compilation (Low Priority)
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        Simplified Analysis                               │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                          │
-│   ┌─────────────────────┐         ┌─────────────────────┐               │
-│   │  Verification       │         │  Source Files       │               │
-│   │  Output (text)      │         │  (*.rs)             │               │
-│   └─────────────────────┘         └─────────────────────┘               │
-│              │                              │                            │
-│              ▼                              ▼                            │
-│   ┌─────────────────────┐         ┌─────────────────────┐               │
-│   │  UnifiedOutputParser│         │  FunctionIndexer    │               │
-│   │  (single pass)      │         │  (with caching)     │               │
-│   └─────────────────────┘         └─────────────────────┘               │
-│              │                              │                            │
-│              │  errors: Vec<ErrorInfo>      │  functions: Vec<FnInfo>    │
-│              │    - type (compile/verify)   │    - name, file, span      │
-│              │    - file, line, message     │                            │
-│              │                              │                            │
-│              └──────────────┬───────────────┘                            │
-│                             ▼                                            │
-│                  ┌─────────────────────┐                                 │
-│                  │   Error Mapper      │                                 │
-│                  │ (binary search by   │                                 │
-│                  │  file + line range) │                                 │
-│                  └─────────────────────┘                                 │
-│                             │                                            │
-│                             ▼                                            │
-│                  ┌─────────────────────┐                                 │
-│                  │   AnalysisResult    │                                 │
-│                  └─────────────────────┘                                 │
-└─────────────────────────────────────────────────────────────────────────┘
+CompilationErrorParser and VerificationParser compile 15+ regexes
+on every instantiation.
 ```
+
+**Potential fix:** Use `lazy_static` or `once_cell` for regex patterns.
+
+### 2. Single-Pass Output Parsing (Medium Priority)
+
+```
+verification_output is parsed 3 times:
+  1. CompilationErrorParser.parse_compilation_output()  
+  2. VerificationParser.parse_verification_output_from_content()
+  3. VerificationParser.parse_verification_failures()
+```
+
+**Potential fix:** Single-pass parser that extracts all outputs.
 
 ### Key Improvements:
 
