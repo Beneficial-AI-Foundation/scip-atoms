@@ -22,6 +22,9 @@ Thumbs.db
 index.scip
 index.scip.json
 
+# Cache directory
+data/
+
 
 
 

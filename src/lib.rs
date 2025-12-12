@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+pub mod verification;
 pub mod verus_parser;
 
 /// SCIP data structures

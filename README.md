@@ -1,6 +1,6 @@
 # scip-atoms
 
-Generates a JSON file of functions with their dependencies and line number ranges from SCIP indexes.
+Generate compact function call graph data from SCIP indexes and analyze Verus verification results.
 
 ## Installation
 
@@ -8,205 +8,161 @@ Generates a JSON file of functions with their dependencies and line number range
 cargo install --path .
 ```
 
-### Prerequisites
+**Prerequisites:** Some commands require external tools (verus-analyzer, scip, cargo verus).  
+See [INSTALL.md](INSTALL.md) for detailed installation instructions.
 
-The following tools are only needed when generating SCIP data (first run or with `--regenerate-scip`). If you already have cached data in `<project_path>/data/`, these are not required.
+## Commands
 
-Install [verus-analyzer](https://github.com/verus-lang/verus-analyzer) and [scip](https://github.com/sourcegraph/scip/).
-For convenience, one can use the below scripts:
-```bash
-# Install using Python scripts (recommended)
-git clone https://github.com/Beneficial-AI-Foundation/installers_for_various_tools
-cd installers_for_various_tools
-python3 verus_analyzer_installer.py
-python3 scip_installer.py
+```
+scip-atoms <COMMAND>
+
+Commands:
+  atoms      Generate SCIP-based call graph atoms with line numbers
+  functions  List all functions in a Rust/Verus project
+  verify     Run Verus verification and analyze results
 ```
 
-## Usage
+---
 
-```bash
-scip-atoms <project_path> [output_json] [--regenerate-scip]
-```
+### `atoms` - Generate Call Graph Data
 
-### Arguments
-
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `<project_path>` | Yes | Path to the Rust/Verus project |
-| `[output_json]` | No | Output file path (default: `atoms.json`) |
-
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `--regenerate-scip`, `-r` | Force regeneration of the SCIP index and JSON, even if cached data exists |
-
-### Examples
+Generate SCIP-based call graph atoms with line numbers.
 
 ```bash
-# Simplest usage - outputs to atoms.json
-scip-atoms ./my-rust-project
+scip-atoms atoms <PROJECT_PATH> [OPTIONS]
 
-# Specify custom output file
-scip-atoms ./my-rust-project output.json
-
-# Force regeneration of SCIP data
-scip-atoms ./my-rust-project --regenerate-scip
-scip-atoms ./my-rust-project custom_output.json -r
+Options:
+  -o, --output <FILE>     Output file path (default: atoms.json)
+  -r, --regenerate-scip   Force regeneration of the SCIP index
 ```
 
-## How It Works
-
-1. **Checks for cached SCIP data** in `<project_path>/data/`
-2. If not found (or `--regenerate-scip` is used):
-   - Runs `verus-analyzer scip` to generate a SCIP index
-   - Converts the binary index to JSON using `scip print --json`
-   - **Caches both files** in `<project_path>/data/` for future runs
-3. Parses the SCIP JSON to extract functions and their call dependencies
-4. **Parses source files with `verus_syn`** to get accurate function body spans
-5. Outputs compact JSON with line number ranges instead of full code
-
-### SCIP Data Caching
-
-To speed up subsequent runs, the tool caches generated SCIP data in the `data/` folder:
-
-```
-<project_path>/
-└── data/
-    ├── index.scip       # Binary SCIP index
-    └── index.scip.json  # JSON conversion (used by the tool)
+**Examples:**
+```bash
+scip-atoms atoms ./my-rust-project
+scip-atoms atoms ./my-rust-project -o output.json
+scip-atoms atoms ./my-rust-project --regenerate-scip
 ```
 
-**Benefits:**
-- Subsequent runs skip the slow `verus-analyzer scip` and `scip print --json` steps
-- When using cached data, `verus-analyzer` and `scip` tools don't need to be installed
-- Use `--regenerate-scip` when your source code changes and you need fresh data
-
-### Accurate Line Spans with verus_syn
-
-SCIP indexes only provide the location of function **names**, not their full body spans. To get accurate `lines-start` and `lines-end` values, this tool uses [`verus_syn`](https://crates.io/crates/verus_syn) to parse the actual source files.
-
-**Why verus_syn?**
-- Standard `syn` doesn't understand Verus-specific syntax
-- `verus_syn` handles `verus! { }` macro blocks which contain most Verus function definitions
-- It correctly parses `proof fn`, `spec fn`, and other Verus constructs
-
-**How it works:**
-1. Parse each source file into an AST using `verus_syn::parse_file`
-2. Visit all function definitions (including those inside `verus!` blocks)
-3. Extract the full span (start line to end line) of each function
-4. Match parsed functions to SCIP symbols by name and approximate line number
-
-This achieves **~95% accuracy** for function spans in typical Verus projects.
-
-## Output Format
-
+**Output format:**
 ```json
 [
   {
     "display-name": "my_function",
     "scip-name": "curve25519-dalek 4.1.3 module/my_function()",
-    "dependencies": [
-      "curve25519-dalek 4.1.3 module/dependency_fn()"
-    ],
+    "dependencies": ["..."],
     "code-path": "src/lib.rs",
-    "code-text": {
-      "lines-start": 42,
-      "lines-end": 100
-    }
+    "code-text": { "lines-start": 42, "lines-end": 100 }
   }
 ]
 ```
 
-**Fields:**
-- `display-name`: Function name
-- `scip-name`: SCIP symbol name (with "rust-analyzer cargo " prefix and ending pattern stripped)
-- `dependencies`: Set of called functions (both project and external) as SCIP names
-- `code-path`: Source file path
-- `code-text`: Line range where function is defined (1-based)
+---
 
-### Function Entries vs Dependencies
+### `functions` - List Functions
 
-- **Entries**: Only functions **defined in your project** appear as top-level entries
-- **Dependencies**: Both project functions AND external functions (from std, other crates) are tracked
+List all functions in a Rust/Verus project with optional metadata.
 
-This means you get a complete picture of what each function calls, while keeping the output focused on your project's code.
+```bash
+scip-atoms functions <PATH> [OPTIONS]
 
-## Example Output
-
-### First run (generating SCIP data)
-
-```
-$ scip-atoms ./my-project
-
-═══════════════════════════════════════════════════════════
-  SCIP Atoms - Generate Compact Call Graph Data
-═══════════════════════════════════════════════════════════
-
-  ✓ Valid Rust project found
-  ✓ Prerequisites verified (verus-analyzer, scip)
-
-Generating SCIP index for ./my-project (no existing SCIP data found)...
-  (This may take a while for large projects)
-  ✓ SCIP index generated successfully
-  ✓ index.scip saved to ./my-project/data/index.scip
-Converting index.scip to JSON...
-  ✓ SCIP JSON saved to ./my-project/data/index.scip.json
-
-Parsing SCIP JSON and building call graph...
-  ✓ Call graph built with 355 functions
-
-Converting to atoms format with accurate line numbers...
-  Parsing source files with verus_syn for accurate function spans...
-  ✓ Converted 355 functions to atoms format
-
-═══════════════════════════════════════════════════════════
-  ✓ SUCCESS
-═══════════════════════════════════════════════════════════
-
-Output written to: atoms.json
-
-Summary:
-  - Total functions: 355
-  - Total dependencies: 433
-  - Output format: atoms with line numbers and visibility flags
+Options:
+  -f, --format <FORMAT>          text, json, or detailed (default: text)
+      --exclude-verus-constructs Exclude spec/proof/exec functions
+      --exclude-methods          Exclude trait and impl methods
+      --show-visibility          Show pub/private
+      --show-kind                Show fn/spec fn/proof fn/etc.
+      --json-output <FILE>       Write JSON to file
 ```
 
-### Subsequent runs (using cached data)
-
+**Examples:**
+```bash
+scip-atoms functions ./src
+scip-atoms functions ./src --format detailed --show-visibility --show-kind
+scip-atoms functions ./my-project --format json
 ```
-$ scip-atoms ./my-project
 
-═══════════════════════════════════════════════════════════
-  SCIP Atoms - Generate Compact Call Graph Data
-═══════════════════════════════════════════════════════════
+---
 
-  ✓ Valid Rust project found
-  ✓ Found existing SCIP JSON at ./my-project/data/index.scip.json
-    (use --regenerate-scip to force regeneration)
+### `verify` - Run Verus Verification
 
-Parsing SCIP JSON and building call graph...
-  ✓ Call graph built with 355 functions
+Run Verus verification on a project and analyze results. Supports caching for quick re-analysis.
 
-Converting to atoms format with accurate line numbers...
-  Parsing source files with verus_syn for accurate function spans...
-  ✓ Converted 355 functions to atoms format
+```bash
+scip-atoms verify [PROJECT_PATH] [OPTIONS]
 
-═══════════════════════════════════════════════════════════
-  ✓ SUCCESS
-═══════════════════════════════════════════════════════════
-
-Output written to: atoms.json
-
-Summary:
-  - Total functions: 355
-  - Total dependencies: 433
-  - Output format: atoms with line numbers and visibility flags
+Options:
+      --from-file <FILE>         Analyze existing output file instead of running verification
+      --exit-code <CODE>         Exit code (only used with --from-file)
+  -p, --package <NAME>           Package to verify (for workspaces)
+      --verify-only-module <MOD> Module to verify
+      --verify-function <FUNC>   Function to verify
+      --json-output <FILE>       Write JSON results to file (default: results.json)
+      --no-cache                 Don't cache the verification output
 ```
+
+**Caching Workflow:**
+
+```bash
+# First run: runs verification and caches output to data/
+scip-atoms verify ./my-verus-project -p my-crate --json-output results.json
+
+# Subsequent runs: uses cached output (no need to re-run verification)
+scip-atoms verify
+```
+
+**Examples:**
+```bash
+# Run verification (caches output automatically)
+scip-atoms verify ./my-verus-project
+scip-atoms verify ./my-workspace -p my-crate
+
+# Use cached output (no project path needed)
+scip-atoms verify
+
+# Analyze existing output file (from CI, etc.)
+scip-atoms verify ./my-project --from-file verification_output.txt
+```
+
+**Function Categorization:**
+
+Functions with `requires`/`ensures` are categorized as:
+- **verified**: Passed verification, no `assume()`/`admit()`
+- **failed**: Had verification errors
+- **unverified**: Contains `assume()` or `admit()`
+
+**Output format:**
+```json
+{
+  "status": "verification_failed",
+  "summary": {
+    "total_functions": 262,
+    "failed_functions": 2,
+    "verified_functions": 171,
+    "unverified_functions": 89
+  },
+  "verification": {
+    "failed_functions": [...],
+    "verified_functions": [...],
+    "unverified_functions": [...]
+  }
+}
+```
+
+---
+
+## How It Works
+
+See [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md) for detailed technical documentation on:
+
+- SCIP-based call graph generation
+- Accurate line spans with verus_syn parsing
+- Disambiguation of trait implementations
+- Verification output parsing and function categorization
+
+See [docs/VERIFICATION_ARCHITECTURE.md](docs/VERIFICATION_ARCHITECTURE.md) for the verification analysis architecture.
+
+---
 
 ## License
 
 MIT
-
-
-

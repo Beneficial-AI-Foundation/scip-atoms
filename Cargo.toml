@@ -19,6 +19,8 @@ regex = "1.10"
 verus_syn = { version = "0.0.0-2025-11-16-0050", features = ["full", "visit", "parsing"] }
 proc-macro2 = { version = "1.0", features = ["span-locations"] }
 quote = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+walkdir = "2.4"
 
 [dev-dependencies]
 tempfile = "3.10"
