@@ -9,7 +9,7 @@ use clap::{Parser, Subcommand};
 use scip_atoms::{
     build_call_graph, convert_to_atoms_with_parsed_spans, find_duplicate_scip_names,
     parse_scip_json,
-    verification::{AnalysisStatus, VerificationAnalyzer, VerusRunner},
+    verification::{enrich_with_scip_names, AnalysisStatus, VerificationAnalyzer, VerusRunner},
     verus_parser::{self, ParsedOutput},
 };
 use std::path::PathBuf;
@@ -103,6 +103,11 @@ enum Commands {
         /// Don't cache the verification output
         #[arg(long)]
         no_cache: bool,
+
+        /// Enrich results with scip-names from atoms.json file
+        /// If no file specified, looks for atoms.json in current directory
+        #[arg(long)]
+        with_scip_names: Option<Option<PathBuf>>,
     },
 }
 
@@ -429,6 +434,7 @@ fn cmd_verify(
     verify_function: Option<String>,
     json_output: Option<PathBuf>,
     no_cache: bool,
+    with_scip_names: Option<Option<PathBuf>>,
 ) {
     // Determine the project path and verification output source
     let (project_path, verification_output, exit_code) = if let Some(ref path) = project_path {
@@ -581,13 +587,33 @@ fn cmd_verify(
 
     // Analyze the output
     let analyzer = VerificationAnalyzer::new();
-    let result = analyzer.analyze_output(
+    let mut result = analyzer.analyze_output(
         &project_path,
         &verification_output,
         Some(exit_code),
         verify_only_module.as_deref(),
         verify_function.as_deref(),
     );
+
+    // Enrich with scip-names if requested
+    if let Some(atoms_path_opt) = with_scip_names {
+        // Use provided path or default to atoms.json
+        let atoms_path = atoms_path_opt.unwrap_or_else(|| PathBuf::from("atoms.json"));
+
+        if atoms_path.exists() {
+            println!("Populating scip-names from {}...", atoms_path.display());
+            match enrich_with_scip_names(&mut result, &atoms_path) {
+                Ok(count) => {
+                    println!("  Enriched {} functions with scip-names", count);
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to enrich with scip-names: {}", e);
+                }
+            }
+        } else {
+            eprintln!("Warning: atoms.json not found at {}", atoms_path.display());
+        }
+    }
 
     // Always write to JSON file (default: results.json)
     let output_path = json_output.unwrap_or_else(|| PathBuf::from("results.json"));
@@ -681,6 +707,7 @@ fn main() {
             verify_function,
             json_output,
             no_cache,
+            with_scip_names,
         } => {
             cmd_verify(
                 project_path,
@@ -691,6 +718,7 @@ fn main() {
                 verify_function,
                 json_output,
                 no_cache,
+                with_scip_names,
             );
         }
     }

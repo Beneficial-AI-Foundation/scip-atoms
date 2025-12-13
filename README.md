@@ -98,13 +98,14 @@ Options:
       --verify-function <FUNC>   Function to verify
       --json-output <FILE>       Write JSON results to file (default: results.json)
       --no-cache                 Don't cache the verification output
+      --with-scip-names [FILE]   Enrich results with scip-names from atoms.json
 ```
 
 **Caching Workflow:**
 
 ```bash
 # First run: runs verification and caches output to data/
-scip-atoms verify ./my-verus-project -p my-crate --json-output results.json
+scip-atoms verify ./my-verus-project -p my-crate
 
 # Subsequent runs: uses cached output (no need to re-run verification)
 scip-atoms verify
@@ -121,6 +122,10 @@ scip-atoms verify
 
 # Analyze existing output file (from CI, etc.)
 scip-atoms verify ./my-project --from-file verification_output.txt
+
+# Enrich results with scip-names from atoms.json
+scip-atoms verify --with-scip-names
+scip-atoms verify --with-scip-names path/to/atoms.json
 ```
 
 **Function Categorization:**
@@ -141,12 +146,21 @@ Functions with `requires`/`ensures` are categorized as:
     "unverified_functions": 89
   },
   "verification": {
-    "failed_functions": [...],
+    "failed_functions": [
+      {
+        "display-name": "my_function",
+        "scip-name": "crate 1.0.0 module/my_function().",
+        "code-path": "src/lib.rs",
+        "code-text": { "lines-start": 10, "lines-end": 20 }
+      }
+    ],
     "verified_functions": [...],
     "unverified_functions": [...]
   }
 }
 ```
+
+Note: `scip-name` is only present when using `--with-scip-names`.
 
 ---
 
@@ -166,3 +180,4 @@ See [docs/VERIFICATION_ARCHITECTURE.md](docs/VERIFICATION_ARCHITECTURE.md) for t
 ## License
 
 MIT
+

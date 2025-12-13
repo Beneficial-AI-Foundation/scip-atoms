@@ -601,11 +601,13 @@ pub fn parse_all_functions(
     let mut total_files = 0;
 
     // Get the base directory to strip from paths (to make them project-relative)
-    // If path is a file, use its parent; if directory, use its parent
-    let base_dir = if path.is_file() {
+    // This matches how verus-analyzer generates relative_path in SCIP:
+    // - For a directory: use the directory itself as base, so paths are relative to it
+    // - For a file: use grandparent to include the parent directory name
+    let base_dir: Option<&Path> = if path.is_file() {
         path.parent().and_then(|p| p.parent())
     } else {
-        path.parent()
+        Some(path)
     };
 
     // Helper to make path relative to project root (like atoms.json format)
