@@ -96,11 +96,11 @@ pub struct FunctionNode {
 pub struct AtomWithLines {
     #[serde(rename = "display-name")]
     pub display_name: String,
-    #[serde(rename = "scip-name")]
+    #[serde(skip_serializing)]
     pub scip_name: String,
+    pub dependencies: HashSet<String>,
     #[serde(rename = "code-module")]
     pub code_module: String,
-    pub dependencies: HashSet<String>,
     #[serde(rename = "code-path")]
     pub code_path: String,
     #[serde(rename = "code-text")]
@@ -1148,8 +1148,8 @@ fn convert_to_atoms_with_lines_internal(
             AtomWithLines {
                 display_name: data.node.display_name.clone(),
                 scip_name,
-                code_module,
                 dependencies,
+                code_module,
                 code_path: data.node.relative_path.clone(),
                 code_text: CodeTextInfo {
                     lines_start: data.lines_start,
