@@ -686,24 +686,35 @@ fn is_missing_self_type(symbol: &str) -> bool {
 
 /// Extract the module path from a scip_name.
 ///
-/// Given a scip_name like "curve25519-dalek 4.1.3 montgomery/MontgomeryPoint#ct_eq()",
-/// extracts the third space-separated string and returns the part before the final "/".
+/// Given a scip_name like "scip:curve25519-dalek/4.1.3/montgomery/MontgomeryPoint#ct_eq()",
+/// extracts the module path (everything between version and the type name).
 ///
-/// Example: "curve25519-dalek 4.1.3 montgomery/MontgomeryPoint#ct_eq()" -> "montgomery"
-/// Example: "crate 0.1.0 foo/bar/Baz#method()" -> "foo/bar"
-/// Example: "crate 0.1.0 TopLevel#method()" -> "" (no slash)
+/// Example: "scip:curve25519-dalek/4.1.3/montgomery/MontgomeryPoint#ct_eq()" -> "montgomery"
+/// Example: "scip:crate/0.1.0/foo/bar/Baz#method()" -> "foo/bar"
+/// Example: "scip:crate/0.1.0/TopLevel#method()" -> "" (no module path)
 fn extract_code_module(scip_name: &str) -> String {
-    // Split by spaces and get the third part (index 2)
-    let parts: Vec<&str> = scip_name.split(' ').collect();
-    if parts.len() < 3 {
+    // Strip "scip:" prefix
+    let s = scip_name.strip_prefix("scip:").unwrap_or(scip_name);
+
+    // Find the position of "#" which marks the type/method boundary
+    let hash_pos = s.find('#').unwrap_or(s.len());
+    let before_hash = &s[..hash_pos];
+
+    // Find positions of "/" to skip crate and version
+    let slashes: Vec<usize> = before_hash.match_indices('/').map(|(i, _)| i).collect();
+
+    // Need at least 2 slashes (after crate, after version)
+    // If there's a 3rd slash, there's a module path
+    if slashes.len() < 3 {
         return String::new();
     }
 
-    let path_part = parts[2];
+    // Module path is between second slash (after version) and last slash (before type)
+    let start = slashes[1] + 1;
+    let end = slashes[slashes.len() - 1];
 
-    // Find the last "/" and return everything before it
-    if let Some(last_slash_pos) = path_part.rfind('/') {
-        path_part[..last_slash_pos].to_string()
+    if start < end {
+        before_hash[start..end].to_string()
     } else {
         String::new()
     }
@@ -834,7 +845,10 @@ fn symbol_to_scip_name_full(
         result = format!("{}@{}", result, line);
     }
 
-    result
+    // Convert to scip: URI format
+    // "curve25519-dalek 4.1.3 montgomery/MontgomeryPoint#ct_eq()"
+    // becomes "scip:curve25519-dalek/4.1.3/montgomery/MontgomeryPoint#ct_eq()"
+    format!("scip:{}", result.replace(' ', "/"))
 }
 
 /// Convert call graph to atoms with line numbers format.
