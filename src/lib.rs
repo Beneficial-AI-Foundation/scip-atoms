@@ -98,6 +98,8 @@ pub struct AtomWithLines {
     pub display_name: String,
     #[serde(rename = "scip-name")]
     pub scip_name: String,
+    #[serde(rename = "code-module")]
+    pub code_module: String,
     pub dependencies: HashSet<String>,
     #[serde(rename = "code-path")]
     pub code_path: String,
@@ -681,6 +683,32 @@ fn is_missing_self_type(symbol: &str) -> bool {
 /// 1. Adding trait type parameters (e.g., Mul -> Mul<Scalar>) for disambiguation
 /// 2. Adding the Self type when missing (e.g., montgomery/Mul#mul -> montgomery/MontgomeryPoint#Mul#mul)
 /// 3. Adding line number suffix when type info alone can't disambiguate (e.g., generic impls)
+
+/// Extract the module path from a scip_name.
+///
+/// Given a scip_name like "curve25519-dalek 4.1.3 montgomery/MontgomeryPoint#ct_eq()",
+/// extracts the third space-separated string and returns the part before the final "/".
+///
+/// Example: "curve25519-dalek 4.1.3 montgomery/MontgomeryPoint#ct_eq()" -> "montgomery"
+/// Example: "crate 0.1.0 foo/bar/Baz#method()" -> "foo/bar"
+/// Example: "crate 0.1.0 TopLevel#method()" -> "" (no slash)
+fn extract_code_module(scip_name: &str) -> String {
+    // Split by spaces and get the third part (index 2)
+    let parts: Vec<&str> = scip_name.split(' ').collect();
+    if parts.len() < 3 {
+        return String::new();
+    }
+
+    let path_part = parts[2];
+
+    // Find the last "/" and return everything before it
+    if let Some(last_slash_pos) = path_part.rfind('/') {
+        path_part[..last_slash_pos].to_string()
+    } else {
+        String::new()
+    }
+}
+
 fn symbol_to_scip_name(
     symbol: &str,
     display_name: &str,
@@ -1102,9 +1130,11 @@ fn convert_to_atoms_with_lines_internal(
                 }
             }
 
+            let code_module = extract_code_module(&scip_name);
             AtomWithLines {
                 display_name: data.node.display_name.clone(),
                 scip_name,
+                code_module,
                 dependencies,
                 code_path: data.node.relative_path.clone(),
                 code_text: CodeTextInfo {
