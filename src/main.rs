@@ -4,6 +4,7 @@
 //! - `atoms`: Generate SCIP-based call graph data with line numbers
 //! - `functions`: List all functions in a Rust/Verus project
 //! - `verify`: Run Verus verification and analyze results (or analyze existing output)
+//! - `specify`: Extract function specifications (requires/ensures) to JSON
 
 use clap::{Parser, Subcommand};
 use scip_atoms::{
@@ -108,6 +109,16 @@ enum Commands {
         /// If no file specified, looks for atoms.json in current directory
         #[arg(long)]
         with_scip_names: Option<Option<PathBuf>>,
+    },
+
+    /// Extract function specifications (requires/ensures) to JSON
+    Specify {
+        /// Path to search (file or directory)
+        path: PathBuf,
+
+        /// Output file path (default: specs.json)
+        #[arg(long, default_value = "specs.json")]
+        json_output: PathBuf,
     },
 }
 
@@ -678,6 +689,33 @@ fn cmd_verify(
     }
 }
 
+fn cmd_specify(path: PathBuf, output: PathBuf) {
+    if !path.exists() {
+        eprintln!("Error: Path does not exist: {}", path.display());
+        std::process::exit(1);
+    }
+
+    // Parse all functions with spec info (requires/ensures)
+    // Include verus constructs and methods, but don't show visibility/kind in output
+    let parsed: ParsedOutput = verus_parser::parse_all_functions(
+        &path,
+        true,  // include_verus_constructs
+        true,  // include_methods
+        false, // show_visibility
+        false, // show_kind
+    );
+
+    // Write JSON output
+    let json = serde_json::to_string_pretty(&parsed).expect("Failed to serialize JSON");
+    std::fs::write(&output, &json).expect("Failed to write JSON output");
+    println!(
+        "Wrote {} functions from {} files to {}",
+        parsed.summary.total_functions,
+        parsed.summary.total_files,
+        output.display()
+    );
+}
+
 fn main() {
     let cli = Cli::parse();
 
@@ -730,6 +768,9 @@ fn main() {
                 no_cache,
                 with_scip_names,
             );
+        }
+        Commands::Specify { path, json_output } => {
+            cmd_specify(path, json_output);
         }
     }
 }
