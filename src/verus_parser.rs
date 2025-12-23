@@ -583,7 +583,7 @@ fn find_rust_files(path: &Path) -> Vec<std::path::PathBuf> {
     WalkDir::new(path)
         .into_iter()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().is_some_and(|ext| ext == "rs"))
+        .filter(|e| e.file_type().is_file() && e.path().extension().is_some_and(|ext| ext == "rs"))
         .map(|e| e.path().to_path_buf())
         .collect()
 }
