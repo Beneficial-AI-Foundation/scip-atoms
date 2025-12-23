@@ -292,31 +292,38 @@ fn cmd_atoms(project_path: PathBuf, output: PathBuf, regenerate_scip: bool) {
         convert_to_atoms_with_parsed_spans(&call_graph, &symbol_to_display_name, &project_path);
     println!("  ✓ Converted {} functions to atoms format", atoms.len());
 
-    // Check for duplicate scip_names
+    // Check for duplicate scip_names - these are now a fatal error
     let duplicates = find_duplicate_scip_names(&atoms);
     if !duplicates.is_empty() {
-        println!();
-        println!(
-            "  ⚠ WARNING: Found {} duplicate scip_name(s):",
+        eprintln!();
+        eprintln!(
+            "✗ ERROR: Found {} duplicate scip_name(s):",
             duplicates.len()
         );
         for dup in &duplicates {
-            println!("    - '{}'", dup.scip_name);
+            eprintln!("    - '{}'", dup.scip_name);
             for occ in &dup.occurrences {
-                println!(
+                eprintln!(
                     "      at {}:{} ({})",
                     occ.code_path, occ.lines_start, occ.display_name
                 );
             }
         }
-        println!();
-        println!("    Duplicate scip_names may indicate trait implementations that");
-        println!("    cannot be distinguished. Consider filing an issue if this is");
-        println!("    causing problems with downstream tools.");
+        eprintln!();
+        eprintln!("    Duplicate scip_names cannot be used as dictionary keys.");
+        eprintln!("    This may indicate trait implementations that cannot be distinguished.");
+        eprintln!("    Consider filing an issue if this is unexpected.");
+        std::process::exit(1);
     }
 
+    // Convert atoms list to dictionary keyed by scip_name
+    let atoms_dict: std::collections::HashMap<String, _> = atoms
+        .into_iter()
+        .map(|atom| (atom.scip_name.clone(), atom))
+        .collect();
+
     // Write the output
-    let json = serde_json::to_string_pretty(&atoms).expect("Failed to serialize JSON");
+    let json = serde_json::to_string_pretty(&atoms_dict).expect("Failed to serialize JSON");
     std::fs::write(&output, &json).expect("Failed to write output file");
 
     println!();
@@ -327,12 +334,15 @@ fn cmd_atoms(project_path: PathBuf, output: PathBuf, regenerate_scip: bool) {
     println!("Output written to: {}", output.display());
     println!();
     println!("Summary:");
-    println!("  - Total functions: {}", atoms.len());
+    println!("  - Total functions: {}", atoms_dict.len());
     println!(
         "  - Total dependencies: {}",
-        atoms.iter().map(|a| a.dependencies.len()).sum::<usize>()
+        atoms_dict
+            .values()
+            .map(|a| a.dependencies.len())
+            .sum::<usize>()
     );
-    println!("  - Output format: atoms with line numbers and visibility flags");
+    println!("  - Output format: dictionary keyed by scip_name");
     println!();
 }
 

@@ -96,9 +96,11 @@ pub struct FunctionNode {
 pub struct AtomWithLines {
     #[serde(rename = "display-name")]
     pub display_name: String,
-    #[serde(rename = "scip-name")]
+    #[serde(skip_serializing)]
     pub scip_name: String,
     pub dependencies: HashSet<String>,
+    #[serde(rename = "code-module")]
+    pub code_module: String,
     #[serde(rename = "code-path")]
     pub code_path: String,
     #[serde(rename = "code-text")]
@@ -668,6 +670,42 @@ fn is_missing_self_type(symbol: &str) -> bool {
     hash_count == 1
 }
 
+/// Extract the module path from a scip_name.
+///
+/// Given a scip_name like "scip:curve25519-dalek/4.1.3/montgomery/MontgomeryPoint#ct_eq()",
+/// extracts the module path (everything between version and the type name).
+///
+/// Example: "scip:curve25519-dalek/4.1.3/montgomery/MontgomeryPoint#ct_eq()" -> "montgomery"
+/// Example: "scip:crate/0.1.0/foo/bar/Baz#method()" -> "foo/bar"
+/// Example: "scip:crate/0.1.0/TopLevel#method()" -> "" (no module path)
+fn extract_code_module(scip_name: &str) -> String {
+    // Strip "scip:" prefix
+    let s = scip_name.strip_prefix("scip:").unwrap_or(scip_name);
+
+    // Find the position of "#" which marks the type/method boundary
+    let hash_pos = s.find('#').unwrap_or(s.len());
+    let before_hash = &s[..hash_pos];
+
+    // Find positions of "/" to skip crate and version
+    let slashes: Vec<usize> = before_hash.match_indices('/').map(|(i, _)| i).collect();
+
+    // Need at least 2 slashes (after crate, after version)
+    // If there's a 3rd slash, there's a module path
+    if slashes.len() < 3 {
+        return String::new();
+    }
+
+    // Module path is between second slash (after version) and last slash (before type)
+    let start = slashes[1] + 1;
+    let end = slashes[slashes.len() - 1];
+
+    if start < end {
+        before_hash[start..end].to_string()
+    } else {
+        String::new()
+    }
+}
+
 /// Convert symbol to a scip name, optionally including type info for disambiguation.
 ///
 /// Parameters:
@@ -675,11 +713,10 @@ fn is_missing_self_type(symbol: &str) -> bool {
 /// - `display_name`: The function/method name
 /// - `signature`: Optional function signature (e.g., "fn mul(self, scalar: &Scalar) -> MontgomeryPoint")
 /// - `self_type`: Optional Self type extracted from the self parameter (e.g., "MontgomeryPoint")
-/// - `line_number`: Optional line number, used as last resort for disambiguation
 ///
 /// This function repairs verus-analyzer's inconsistent symbol format by:
-/// 1. Adding trait type parameters (e.g., Mul -> Mul<Scalar>) for disambiguation
-/// 2. Adding the Self type when missing (e.g., montgomery/Mul#mul -> montgomery/MontgomeryPoint#Mul#mul)
+/// 1. Adding trait type parameters (e.g., `Mul` -> `Mul<Scalar>`) for disambiguation
+/// 2. Adding the Self type when missing (e.g., `montgomery/Mul#mul` -> `montgomery/MontgomeryPoint#Mul#mul`)
 /// 3. Adding line number suffix when type info alone can't disambiguate (e.g., generic impls)
 fn symbol_to_scip_name(
     symbol: &str,
@@ -806,81 +843,10 @@ fn symbol_to_scip_name_full(
         result = format!("{}@{}", result, line);
     }
 
-    result
-}
-
-/// Convert symbol to a path format with specified separator
-fn symbol_to_path_with_sep(symbol: &str, display_name: &str, sep: &str) -> String {
-    let mut s = symbol;
-    let mut crate_name = String::new();
-
-    // Skip "rust-analyzer cargo " prefix and extract crate name
-    if let Some(rest) = symbol.strip_prefix("rust-analyzer cargo ") {
-        s = rest;
-        // Extract crate name (everything before the first space, which precedes the version)
-        if let Some(space_pos) = s.find(' ') {
-            crate_name = s[..space_pos].replace('-', "_");
-            s = &s[space_pos + 1..]; // Move past crate name
-        }
-    }
-
-    // Skip version part if present (e.g., "4.1.3 ")
-    if let Some(pos) = s.find(|c: char| c.is_ascii_digit()) {
-        if let Some(space_pos) = s[pos..].find(' ') {
-            s = s[(pos + space_pos + 1)..].trim();
-        }
-    }
-
-    let sep_char = sep.chars().next().unwrap_or('/');
-    let mut clean_path = s
-        .trim_end_matches('.')
-        .replace('-', "_")
-        .replace(['[', ']', '#'], sep)
-        .replace('/', sep)
-        .trim_end_matches(sep_char)
-        .replace(&['`', '(', ')', '[', ']'][..], "");
-
-    // Clean up double separators
-    let double_sep = format!("{}{}", sep, sep);
-    while clean_path.contains(&double_sep) {
-        clean_path = clean_path.replace(&double_sep, sep);
-    }
-
-    // Remove angle-bracketed generics
-    let re = regex::Regex::new(r"<[^>]*>").unwrap_or_else(|_| regex::Regex::new(r"").unwrap());
-    clean_path = re.replace_all(&clean_path, "").to_string();
-
-    // Clean up leading/trailing separators
-    clean_path = clean_path
-        .trim_matches(&sep.chars().collect::<Vec<_>>()[..])
-        .to_string();
-
-    // Add crate name prefix if we have one and it's not already there
-    if !crate_name.is_empty() && !clean_path.starts_with(&crate_name) {
-        clean_path = format!("{}{}{}", crate_name, sep, clean_path);
-    }
-
-    // Ensure the path ends with the display name
-    if !clean_path.ends_with(display_name) {
-        clean_path = format!("{}{}{}", clean_path, sep, display_name)
-    }
-
-    // Truncate if too long
-    if clean_path.len() > 200 {
-        clean_path.truncate(200);
-    }
-
-    clean_path
-}
-
-/// Convert symbol to Rust-style path with :: separators (for code-function field)
-pub fn symbol_to_rust_path(symbol: &str, display_name: &str) -> String {
-    symbol_to_path_with_sep(symbol, display_name, "::")
-}
-
-/// Convert symbol to slash-separated path (for dependencies)
-pub fn symbol_to_path(symbol: &str, display_name: &str) -> String {
-    symbol_to_path_with_sep(symbol, display_name, "/")
+    // Convert to scip: URI format
+    // "curve25519-dalek 4.1.3 montgomery/MontgomeryPoint#ct_eq()"
+    // becomes "scip:curve25519-dalek/4.1.3/montgomery/MontgomeryPoint#ct_eq()"
+    format!("scip:{}", result.replace(' ', "/"))
 }
 
 /// Convert call graph to atoms with line numbers format.
@@ -1176,10 +1142,12 @@ fn convert_to_atoms_with_lines_internal(
                 }
             }
 
+            let code_module = extract_code_module(&scip_name);
             AtomWithLines {
                 display_name: data.node.display_name.clone(),
                 scip_name,
                 dependencies,
+                code_module,
                 code_path: data.node.relative_path.clone(),
                 code_text: CodeTextInfo {
                     lines_start: data.lines_start,

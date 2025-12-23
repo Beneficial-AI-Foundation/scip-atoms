@@ -44,17 +44,32 @@ scip-atoms atoms ./my-rust-project --regenerate-scip
 ```
 
 **Output format:**
+
+The output is a dictionary keyed by `scip-name` (a URI-style identifier):
+
 ```json
-[
-  {
+{
+  "scip:curve25519-dalek/4.1.3/module/MyType#my_function()": {
     "display-name": "my_function",
-    "scip-name": "curve25519-dalek 4.1.3 module/my_function()",
-    "dependencies": ["..."],
+    "dependencies": [
+      "scip:curve25519-dalek/4.1.3/other_module/helper()"
+    ],
+    "code-module": "module",
     "code-path": "src/lib.rs",
     "code-text": { "lines-start": 42, "lines-end": 100 }
   }
-]
+}
 ```
+
+**Field descriptions:**
+- **Key (`scip-name`)**: URI-style identifier in format `scip:<crate>/<version>/<module>/<Type>#<method>()`
+- **`display-name`**: The function/method name
+- **`dependencies`**: List of scip-names this function calls
+- **`code-module`**: The module path (e.g., `"foo/bar"` for nested modules, empty for top-level)
+- **`code-path`**: Relative file path
+- **`code-text`**: Line range of the function body
+
+**Note:** Duplicate `scip-name` values are a fatal error (exit code 1).
 
 ---
 
@@ -149,7 +164,7 @@ Functions with `requires`/`ensures` are categorized as:
     "failed_functions": [
       {
         "display-name": "my_function",
-        "scip-name": "crate 1.0.0 module/my_function().",
+        "scip-name": "scip:crate/1.0.0/module/my_function()",
         "code-path": "src/lib.rs",
         "code-text": { "lines-start": 10, "lines-end": 20 }
       }
@@ -160,7 +175,7 @@ Functions with `requires`/`ensures` are categorized as:
 }
 ```
 
-Note: `scip-name` is only present when using `--with-scip-names`.
+Note: `scip-name` is only present when using `--with-scip-names` and uses the URI format `scip:<crate>/<version>/<path>`.
 
 ---
 
