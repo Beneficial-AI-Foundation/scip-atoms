@@ -670,20 +670,6 @@ fn is_missing_self_type(symbol: &str) -> bool {
     hash_count == 1
 }
 
-/// Convert symbol to a scip name, optionally including type info for disambiguation.
-///
-/// Parameters:
-/// - `symbol`: The raw SCIP symbol string
-/// - `display_name`: The function/method name
-/// - `signature`: Optional function signature (e.g., "fn mul(self, scalar: &Scalar) -> MontgomeryPoint")
-/// - `self_type`: Optional Self type extracted from the self parameter (e.g., "MontgomeryPoint")
-/// - `line_number`: Optional line number, used as last resort for disambiguation
-///
-/// This function repairs verus-analyzer's inconsistent symbol format by:
-/// 1. Adding trait type parameters (e.g., Mul -> Mul<Scalar>) for disambiguation
-/// 2. Adding the Self type when missing (e.g., montgomery/Mul#mul -> montgomery/MontgomeryPoint#Mul#mul)
-/// 3. Adding line number suffix when type info alone can't disambiguate (e.g., generic impls)
-
 /// Extract the module path from a scip_name.
 ///
 /// Given a scip_name like "scip:curve25519-dalek/4.1.3/montgomery/MontgomeryPoint#ct_eq()",
@@ -720,6 +706,18 @@ fn extract_code_module(scip_name: &str) -> String {
     }
 }
 
+/// Convert symbol to a scip name, optionally including type info for disambiguation.
+///
+/// Parameters:
+/// - `symbol`: The raw SCIP symbol string
+/// - `display_name`: The function/method name
+/// - `signature`: Optional function signature (e.g., "fn mul(self, scalar: &Scalar) -> MontgomeryPoint")
+/// - `self_type`: Optional Self type extracted from the self parameter (e.g., "MontgomeryPoint")
+///
+/// This function repairs verus-analyzer's inconsistent symbol format by:
+/// 1. Adding trait type parameters (e.g., `Mul` -> `Mul<Scalar>`) for disambiguation
+/// 2. Adding the Self type when missing (e.g., `montgomery/Mul#mul` -> `montgomery/MontgomeryPoint#Mul#mul`)
+/// 3. Adding line number suffix when type info alone can't disambiguate (e.g., generic impls)
 fn symbol_to_scip_name(
     symbol: &str,
     display_name: &str,

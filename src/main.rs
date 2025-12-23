@@ -337,7 +337,10 @@ fn cmd_atoms(project_path: PathBuf, output: PathBuf, regenerate_scip: bool) {
     println!("  - Total functions: {}", atoms_dict.len());
     println!(
         "  - Total dependencies: {}",
-        atoms_dict.values().map(|a| a.dependencies.len()).sum::<usize>()
+        atoms_dict
+            .values()
+            .map(|a| a.dependencies.len())
+            .sum::<usize>()
     );
     println!("  - Output format: dictionary keyed by scip_name");
     println!();
