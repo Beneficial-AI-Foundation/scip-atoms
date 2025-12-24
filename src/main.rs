@@ -119,6 +119,10 @@ enum Commands {
         /// Output file path (default: specs.json)
         #[arg(long, default_value = "specs.json")]
         json_output: PathBuf,
+
+        /// Path to atoms.json file for scip-name lookup (required for dictionary output)
+        #[arg(long)]
+        with_scip_names: PathBuf,
     },
 }
 
@@ -689,14 +693,42 @@ fn cmd_verify(
     }
 }
 
-fn cmd_specify(path: PathBuf, output: PathBuf) {
+fn cmd_specify(path: PathBuf, output: PathBuf, atoms_path: PathBuf) {
+    use std::collections::HashMap;
+
     if !path.exists() {
         eprintln!("Error: Path does not exist: {}", path.display());
         std::process::exit(1);
     }
 
+    if !atoms_path.exists() {
+        eprintln!("Error: atoms.json not found at {}", atoms_path.display());
+        std::process::exit(1);
+    }
+
+    // Load atoms.json to get scip-name mappings
+    #[derive(serde::Deserialize)]
+    struct AtomEntry {
+        #[serde(rename = "display-name")]
+        display_name: String,
+        #[serde(rename = "code-path")]
+        code_path: String,
+        #[serde(rename = "code-text")]
+        code_text: CodeText,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct CodeText {
+        #[serde(rename = "lines-start")]
+        lines_start: usize,
+    }
+
+    let atoms_content =
+        std::fs::read_to_string(&atoms_path).expect("Failed to read atoms.json");
+    let atoms: HashMap<String, AtomEntry> =
+        serde_json::from_str(&atoms_content).expect("Failed to parse atoms.json");
+
     // Parse all functions with spec info (requires/ensures)
-    // Include verus constructs and methods, but don't show visibility/kind in output
     let parsed: ParsedOutput = verus_parser::parse_all_functions(
         &path,
         true,  // include_verus_constructs
@@ -705,14 +737,67 @@ fn cmd_specify(path: PathBuf, output: PathBuf) {
         false, // show_kind
     );
 
+    // Helper to extract suffix for path matching
+    fn extract_suffix(path: &str) -> &str {
+        if let Some(pos) = path.find("/src/") {
+            return &path[pos + 1..];
+        }
+        path
+    }
+
+    // Match functions to scip-names and build output dictionary
+    const LINE_TOLERANCE: usize = 5;
+    let mut output_map: HashMap<String, verus_parser::FunctionInfo> = HashMap::new();
+    let mut matched_count = 0;
+    let mut unmatched_count = 0;
+
+    for func in parsed.functions {
+        let func_path = func.file.as_deref().unwrap_or("");
+        let func_suffix = extract_suffix(func_path);
+        let func_line = func.start_line;
+
+        // Find best matching atom by path and line
+        let mut best_match: Option<&str> = None;
+        let mut best_line_diff = usize::MAX;
+
+        for (scip_name, atom) in &atoms {
+            let atom_suffix = extract_suffix(&atom.code_path);
+
+            let path_matches = func_path.ends_with(&atom.code_path)
+                || atom.code_path.ends_with(func_path)
+                || func_suffix == atom_suffix;
+
+            if path_matches && func.name == atom.display_name {
+                let line_diff =
+                    (func_line as isize - atom.code_text.lines_start as isize).unsigned_abs();
+
+                if line_diff <= LINE_TOLERANCE && line_diff < best_line_diff {
+                    best_match = Some(scip_name);
+                    best_line_diff = line_diff;
+
+                    if line_diff == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+
+        if let Some(scip_name) = best_match {
+            output_map.insert(scip_name.to_string(), func);
+            matched_count += 1;
+        } else {
+            unmatched_count += 1;
+        }
+    }
+
     // Write JSON output
-    let json = serde_json::to_string_pretty(&parsed).expect("Failed to serialize JSON");
+    let json = serde_json::to_string_pretty(&output_map).expect("Failed to serialize JSON");
     std::fs::write(&output, &json).expect("Failed to write JSON output");
     println!(
-        "Wrote {} functions from {} files to {}",
-        parsed.summary.total_functions,
-        parsed.summary.total_files,
-        output.display()
+        "Wrote {} functions to {} ({} unmatched)",
+        matched_count,
+        output.display(),
+        unmatched_count
     );
 }
 
@@ -769,8 +854,12 @@ fn main() {
                 with_scip_names,
             );
         }
-        Commands::Specify { path, json_output } => {
-            cmd_specify(path, json_output);
+        Commands::Specify {
+            path,
+            json_output,
+            with_scip_names,
+        } => {
+            cmd_specify(path, json_output, with_scip_names);
         }
     }
 }

@@ -310,13 +310,13 @@ pub struct FunctionInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<String>, // "impl", "trait", or "standalone"
     /// Whether the function has requires clause (precondition)
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default)]
     pub has_requires: bool,
     /// Whether the function has ensures clause (postcondition)
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default)]
     pub has_ensures: bool,
     /// Whether the function body contains assume() or admit() (trusted assumptions)
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default)]
     pub has_trusted_assumption: bool,
 }
 
