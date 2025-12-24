@@ -723,15 +723,13 @@ fn cmd_specify(path: PathBuf, output: PathBuf, atoms_path: PathBuf) {
         lines_start: usize,
     }
 
-    let atoms_content =
-        std::fs::read_to_string(&atoms_path).expect("Failed to read atoms.json");
+    let atoms_content = std::fs::read_to_string(&atoms_path).expect("Failed to read atoms.json");
     let atoms: HashMap<String, AtomEntry> =
         serde_json::from_str(&atoms_content).expect("Failed to parse atoms.json");
 
     // Parse all functions with spec info (requires/ensures)
     let parsed: ParsedOutput = verus_parser::parse_all_functions(
-        &path,
-        true,  // include_verus_constructs
+        &path, true,  // include_verus_constructs
         true,  // include_methods
         false, // show_visibility
         false, // show_kind
