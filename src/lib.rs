@@ -70,6 +70,29 @@ pub struct CalleeInfo {
     /// Type hints found on the same line as the call (e.g., turbofish type parameters)
     /// Used to disambiguate calls to generic trait implementations
     pub type_hints: Vec<String>,
+    /// Line number where the call occurs (0-based from SCIP)
+    pub line: i32,
+}
+
+/// Location where a function call occurs
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CallLocation {
+    /// Call in requires clause (precondition)
+    Precondition,
+    /// Call in ensures clause (postcondition)
+    Postcondition,
+    /// Call in function body
+    Inner,
+}
+
+/// A dependency with its call location
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DependencyWithLocation {
+    #[serde(rename = "scip-name")]
+    pub scip_name: String,
+    pub location: CallLocation,
+    pub line: usize,
 }
 
 /// Function node in the call graph
@@ -98,7 +121,14 @@ pub struct AtomWithLines {
     pub display_name: String,
     #[serde(skip_serializing)]
     pub scip_name: String,
+    /// Set of dependency scip_names (for backward compatibility)
     pub dependencies: HashSet<String>,
+    /// Dependencies with call location information (only included with --with-locations flag)
+    #[serde(
+        rename = "dependencies-with-locations",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub dependencies_with_locations: Vec<DependencyWithLocation>,
     #[serde(rename = "code-module")]
     pub code_module: String,
     #[serde(rename = "code-path")]
@@ -480,6 +510,7 @@ pub fn build_call_graph(
                             caller_node.callees.insert(CalleeInfo {
                                 symbol: occurrence.symbol.clone(),
                                 type_hints,
+                                line,
                             });
                         }
                     }
@@ -860,7 +891,7 @@ pub fn convert_to_atoms_with_lines(
     call_graph: &HashMap<String, FunctionNode>,
     symbol_to_display_name: &HashMap<String, String>,
 ) -> Vec<AtomWithLines> {
-    convert_to_atoms_with_lines_internal(call_graph, symbol_to_display_name, None)
+    convert_to_atoms_with_lines_internal(call_graph, symbol_to_display_name, None, false)
 }
 
 /// Convert call graph to atoms with accurate line numbers by parsing source files.
@@ -870,6 +901,7 @@ pub fn convert_to_atoms_with_parsed_spans(
     call_graph: &HashMap<String, FunctionNode>,
     symbol_to_display_name: &HashMap<String, String>,
     project_root: &Path,
+    with_locations: bool,
 ) -> Vec<AtomWithLines> {
     // Collect all unique relative paths
     let relative_paths: Vec<String> = call_graph
@@ -882,7 +914,12 @@ pub fn convert_to_atoms_with_parsed_spans(
     // Build the span map by parsing all source files
     let span_map = verus_parser::build_function_span_map(project_root, &relative_paths);
 
-    convert_to_atoms_with_lines_internal(call_graph, symbol_to_display_name, Some(&span_map))
+    convert_to_atoms_with_lines_internal(
+        call_graph,
+        symbol_to_display_name,
+        Some(&span_map),
+        with_locations,
+    )
 }
 
 /// Internal function that does the actual conversion.
@@ -894,6 +931,7 @@ fn convert_to_atoms_with_lines_internal(
     call_graph: &HashMap<String, FunctionNode>,
     symbol_to_display_name: &HashMap<String, String>,
     span_map: Option<&HashMap<(String, String, usize), verus_parser::SpanAndMode>>,
+    with_locations: bool,
 ) -> Vec<AtomWithLines> {
     // === Phase 1: Compute line ranges and base scip_names for all nodes ===
     struct NodeData<'a> {
@@ -902,6 +940,10 @@ fn convert_to_atoms_with_lines_internal(
         lines_end: usize,
         base_scip_name: String,
         mode: String,
+        /// Line range of requires clause, if present
+        requires_range: Option<(usize, usize)>,
+        /// Line range of ensures clause, if present
+        ensures_range: Option<(usize, usize)>,
     }
 
     let node_data: Vec<NodeData> = call_graph
@@ -941,6 +983,18 @@ fn convert_to_atoms_with_lines_internal(
                 "exec".to_string()
             };
 
+            // Get spec ranges (requires/ensures line ranges)
+            let (requires_range, ensures_range) = if let Some(map) = span_map {
+                verus_parser::get_function_spec_ranges(
+                    map,
+                    &node.relative_path,
+                    &node.display_name,
+                    lines_start,
+                )
+            } else {
+                (None, None)
+            };
+
             // Generate base scip_name WITHOUT line number
             let base_scip_name = symbol_to_scip_name(
                 &node.symbol,
@@ -955,6 +1009,8 @@ fn convert_to_atoms_with_lines_internal(
                 lines_end,
                 base_scip_name,
                 mode,
+                requires_range,
+                ensures_range,
             }
         })
         .collect();
@@ -1078,6 +1134,30 @@ fn convert_to_atoms_with_lines_internal(
             });
     }
 
+    // Helper to classify call location based on line number and spec ranges
+    fn classify_call_location(
+        call_line: i32,
+        requires_range: Option<(usize, usize)>,
+        ensures_range: Option<(usize, usize)>,
+    ) -> CallLocation {
+        // SCIP uses 0-based lines, verus_syn uses 1-based - convert
+        let call_line_1based = (call_line + 1) as usize;
+
+        if let Some((start, end)) = requires_range {
+            if call_line_1based >= start && call_line_1based <= end {
+                return CallLocation::Precondition;
+            }
+        }
+
+        if let Some((start, end)) = ensures_range {
+            if call_line_1based >= start && call_line_1based <= end {
+                return CallLocation::Postcondition;
+            }
+        }
+
+        CallLocation::Inner
+    }
+
     // === Phase 4: Build final atoms with resolved dependencies ===
     node_data
         .into_iter()
@@ -1085,12 +1165,35 @@ fn convert_to_atoms_with_lines_internal(
         .map(|(data, scip_name)| {
             // Resolve dependencies: map raw symbols to their full scip_names
             let mut dependencies = HashSet::new();
+            let mut dependencies_with_locations: Vec<DependencyWithLocation> = Vec::new();
+
             for callee in &data.node.callees {
+                // Only compute location info if requested (for --with-locations flag)
+                let (location, call_line_1based) = if with_locations {
+                    let loc = classify_call_location(
+                        callee.line,
+                        data.requires_range,
+                        data.ensures_range,
+                    );
+                    let line = (callee.line + 1) as usize;
+                    (Some(loc), line)
+                } else {
+                    (None, 0)
+                };
+
                 // Check if this callee is a project function with known scip_names
                 if let Some(scip_name_contexts) = raw_symbol_to_scip_names.get(&callee.symbol) {
                     if scip_name_contexts.len() == 1 {
                         // Only one implementation - use it directly
-                        dependencies.insert(scip_name_contexts[0].scip_name.clone());
+                        let dep_scip_name = scip_name_contexts[0].scip_name.clone();
+                        dependencies.insert(dep_scip_name.clone());
+                        if let Some(loc) = location.clone() {
+                            dependencies_with_locations.push(DependencyWithLocation {
+                                scip_name: dep_scip_name,
+                                location: loc,
+                                line: call_line_1based,
+                            });
+                        }
                     } else if !callee.type_hints.is_empty() {
                         // Multiple implementations - try to match using type hints
                         // First, find types in call-site hints that DON'T appear in ALL impl contexts
@@ -1135,17 +1238,39 @@ fn convert_to_atoms_with_lines_internal(
 
                         if matched.len() == 1 {
                             // Found exactly one match - use it
-                            dependencies.insert(matched[0].scip_name.clone());
+                            let dep_scip_name = matched[0].scip_name.clone();
+                            dependencies.insert(dep_scip_name.clone());
+                            if let Some(loc) = location.clone() {
+                                dependencies_with_locations.push(DependencyWithLocation {
+                                    scip_name: dep_scip_name,
+                                    location: loc,
+                                    line: call_line_1based,
+                                });
+                            }
                         } else {
                             // Still ambiguous - include all
                             for ctx in scip_name_contexts {
                                 dependencies.insert(ctx.scip_name.clone());
+                                if let Some(loc) = location.clone() {
+                                    dependencies_with_locations.push(DependencyWithLocation {
+                                        scip_name: ctx.scip_name.clone(),
+                                        location: loc,
+                                        line: call_line_1based,
+                                    });
+                                }
                             }
                         }
                     } else {
                         // No type hints - include all possible implementations
                         for ctx in scip_name_contexts {
                             dependencies.insert(ctx.scip_name.clone());
+                            if let Some(loc) = location.clone() {
+                                dependencies_with_locations.push(DependencyWithLocation {
+                                    scip_name: ctx.scip_name.clone(),
+                                    location: loc,
+                                    line: call_line_1based,
+                                });
+                            }
                         }
                     }
                 } else {
@@ -1155,7 +1280,14 @@ fn convert_to_atoms_with_lines_internal(
                         .cloned()
                         .unwrap_or_else(|| "unknown".to_string());
                     let dep_path = symbol_to_scip_name(&callee.symbol, &display_name, None, None);
-                    dependencies.insert(dep_path);
+                    dependencies.insert(dep_path.clone());
+                    if let Some(loc) = location {
+                        dependencies_with_locations.push(DependencyWithLocation {
+                            scip_name: dep_path,
+                            location: loc,
+                            line: call_line_1based,
+                        });
+                    }
                 }
             }
 
@@ -1164,6 +1296,7 @@ fn convert_to_atoms_with_lines_internal(
                 display_name: data.node.display_name.clone(),
                 scip_name,
                 dependencies,
+                dependencies_with_locations,
                 code_module,
                 code_path: data.node.relative_path.clone(),
                 code_text: CodeTextInfo {

@@ -34,6 +34,7 @@ probe-verus atomize <PROJECT_PATH> [OPTIONS]
 Options:
   -o, --output <FILE>     Output file path (default: atoms.json)
   -r, --regenerate-scip   Force regeneration of the SCIP index
+      --with-locations    Include detailed per-call location info (precondition/postcondition/inner)
 ```
 
 **Examples:**
@@ -41,6 +42,7 @@ Options:
 probe-verus atomize ./my-rust-project
 probe-verus atomize ./my-rust-project -o output.json
 probe-verus atomize ./my-rust-project --regenerate-scip
+probe-verus atomize ./my-rust-project --with-locations  # extended output
 ```
 
 **Output format:**
@@ -56,7 +58,8 @@ The output is a dictionary keyed by `probe-name` (a URI-style identifier):
     ],
     "code-module": "module",
     "code-path": "src/lib.rs",
-    "code-text": { "lines-start": 42, "lines-end": 100 }
+    "code-text": { "lines-start": 42, "lines-end": 100 },
+    "mode": "proof"
   }
 }
 ```
@@ -64,10 +67,47 @@ The output is a dictionary keyed by `probe-name` (a URI-style identifier):
 **Field descriptions:**
 - **Key (`probe-name`)**: URI-style identifier in format `probe:<crate>/<version>/<module>/<Type>#<method>()`
 - **`display-name`**: The function/method name
-- **`dependencies`**: List of probe-names this function calls
+- **`dependencies`**: List of probe-names this function calls (deduplicated)
 - **`code-module`**: The module path (e.g., `"foo/bar"` for nested modules, empty for top-level)
 - **`code-path`**: Relative file path
 - **`code-text`**: Line range of the function body
+- **`mode`**: Verus function mode (`"exec"`, `"proof"`, or `"spec"`)
+
+**Extended output (`--with-locations`):**
+
+When using `--with-locations`, an additional `dependencies-with-locations` field is included:
+
+```json
+{
+  "probe:crate/1.0.0/module/my_function()": {
+    "display-name": "my_function",
+    "dependencies": ["probe:crate/1.0.0/other/helper()"],
+    "dependencies-with-locations": [
+      {
+        "scip-name": "probe:crate/1.0.0/other/helper()",
+        "location": "precondition",
+        "line": 45
+      },
+      {
+        "scip-name": "probe:crate/1.0.0/other/helper()",
+        "location": "inner",
+        "line": 52
+      }
+    ],
+    "code-module": "module",
+    "code-path": "src/lib.rs",
+    "code-text": { "lines-start": 42, "lines-end": 100 },
+    "mode": "exec"
+  }
+}
+```
+
+The `location` field indicates where the call occurs:
+- **`precondition`**: Inside a `requires` clause
+- **`postcondition`**: Inside an `ensures` clause
+- **`inner`**: Inside the function body
+
+This is useful for verification analysis since calls in specifications have different semantics than calls in executable code.
 
 **Note:** Duplicate `probe-name` values are a fatal error (exit code 1).
 

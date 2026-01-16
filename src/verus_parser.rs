@@ -15,6 +15,10 @@ use verus_syn::visit::Visit;
 use verus_syn::{FnMode, ImplItemFn, Item, ItemFn, ItemMacro, TraitItemFn, Visibility};
 use walkdir::WalkDir;
 
+/// Type alias for spec clause line ranges: (requires_range, ensures_range)
+/// Each range is Option<(start_line, end_line)> using 1-based line numbers.
+pub type SpecRanges = (Option<(usize, usize)>, Option<(usize, usize)>);
+
 /// Function span information
 #[derive(Debug, Clone)]
 pub struct FunctionSpan {
@@ -23,6 +27,10 @@ pub struct FunctionSpan {
     pub end_line: usize,
     /// Verus function mode: "exec", "proof", or "spec"
     pub mode: String,
+    /// Line range of requires clause (start, end), if present
+    pub requires_range: Option<(usize, usize)>,
+    /// Line range of ensures clause (start, end), if present
+    pub ensures_range: Option<(usize, usize)>,
 }
 
 /// Visitor that collects function spans from an AST
@@ -45,6 +53,21 @@ impl FunctionSpanVisitor {
             FnMode::Exec(_) | FnMode::Default => "exec".to_string(),
         }
     }
+
+    /// Extract requires/ensures line ranges from a signature's spec
+    fn extract_spec_ranges(sig: &verus_syn::Signature) -> SpecRanges {
+        let requires_range = sig.spec.requires.as_ref().map(|req| {
+            let span = req.span();
+            (span.start().line, span.end().line)
+        });
+
+        let ensures_range = sig.spec.ensures.as_ref().map(|ens| {
+            let span = ens.span();
+            (span.start().line, span.end().line)
+        });
+
+        (requires_range, ensures_range)
+    }
 }
 
 impl<'ast> Visit<'ast> for FunctionSpanVisitor {
@@ -54,12 +77,15 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
         let start_line = span.start().line;
         let end_line = span.end().line;
         let mode = Self::mode_to_string(&node.sig.mode);
+        let (requires_range, ensures_range) = Self::extract_spec_ranges(&node.sig);
 
         self.functions.push(FunctionSpan {
             name,
             start_line,
             end_line,
             mode,
+            requires_range,
+            ensures_range,
         });
 
         // Continue visiting nested items
@@ -72,12 +98,15 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
         let start_line = span.start().line;
         let end_line = span.end().line;
         let mode = Self::mode_to_string(&node.sig.mode);
+        let (requires_range, ensures_range) = Self::extract_spec_ranges(&node.sig);
 
         self.functions.push(FunctionSpan {
             name,
             start_line,
             end_line,
             mode,
+            requires_range,
+            ensures_range,
         });
 
         // Continue visiting nested items
@@ -90,12 +119,15 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
         let start_line = span.start().line;
         let end_line = span.end().line;
         let mode = Self::mode_to_string(&node.sig.mode);
+        let (requires_range, ensures_range) = Self::extract_spec_ranges(&node.sig);
 
         self.functions.push(FunctionSpan {
             name,
             start_line,
             end_line,
             mode,
+            requires_range,
+            ensures_range,
         });
 
         // Continue visiting nested items
@@ -251,6 +283,10 @@ pub fn parse_file_for_spans(file_path: &Path) -> Result<Vec<FunctionSpan>, Strin
 pub struct SpanAndMode {
     pub end_line: usize,
     pub mode: String,
+    /// Line range of requires clause (start, end), if present
+    pub requires_range: Option<(usize, usize)>,
+    /// Line range of ensures clause (start, end), if present
+    pub ensures_range: Option<(usize, usize)>,
 }
 
 /// Parse all source files in a project and build a lookup map.
@@ -273,13 +309,15 @@ pub fn build_function_span_map(
         if let Ok(functions) = parse_file_for_spans(&full_path) {
             for func in functions {
                 // Key: (relative_path, function_name, start_line)
-                // Value: SpanAndMode (end_line + mode)
+                // Value: SpanAndMode (end_line + mode + spec ranges)
                 let key = (rel_path.clone(), func.name.clone(), func.start_line);
                 span_map.insert(
                     key,
                     SpanAndMode {
                         end_line: func.end_line,
                         mode: func.mode,
+                        requires_range: func.requires_range,
+                        ensures_range: func.ensures_range,
                     },
                 );
             }
@@ -356,6 +394,39 @@ pub fn get_function_mode(
     }
 
     None
+}
+
+/// Get the spec ranges (requires/ensures) for a function.
+///
+/// Returns (requires_range, ensures_range) where each is Option<(start_line, end_line)>.
+pub fn get_function_spec_ranges(
+    span_map: &HashMap<(String, String, usize), SpanAndMode>,
+    relative_path: &str,
+    function_name: &str,
+    start_line: usize,
+) -> SpecRanges {
+    // Try exact match first
+    let key = (
+        relative_path.to_string(),
+        function_name.to_string(),
+        start_line,
+    );
+    if let Some(span_and_mode) = span_map.get(&key) {
+        return (span_and_mode.requires_range, span_and_mode.ensures_range);
+    }
+
+    // Try containment match
+    for ((path, name, parsed_start), span_and_mode) in span_map.iter() {
+        if path == relative_path
+            && name == function_name
+            && start_line >= *parsed_start
+            && start_line <= span_and_mode.end_line
+        {
+            return (span_and_mode.requires_range, span_and_mode.ensures_range);
+        }
+    }
+
+    (None, None)
 }
 
 /// Detailed function information for listing

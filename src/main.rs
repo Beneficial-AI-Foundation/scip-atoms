@@ -39,6 +39,10 @@ enum Commands {
         /// Force regeneration of the SCIP index
         #[arg(short, long)]
         regenerate_scip: bool,
+
+        /// Include dependencies-with-locations (detailed per-call location info)
+        #[arg(long)]
+        with_locations: bool,
     },
 
     /// List all functions in a Rust/Verus project
@@ -182,7 +186,12 @@ fn check_command_exists(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn cmd_atomize(project_path: PathBuf, output: PathBuf, regenerate_scip: bool) {
+fn cmd_atomize(
+    project_path: PathBuf,
+    output: PathBuf,
+    regenerate_scip: bool,
+    with_locations: bool,
+) {
     println!("═══════════════════════════════════════════════════════════");
     println!("  Probe Verus - Atomize: Generate Call Graph Data");
     println!("═══════════════════════════════════════════════════════════");
@@ -339,9 +348,16 @@ fn cmd_atomize(project_path: PathBuf, output: PathBuf, regenerate_scip: bool) {
     println!("Converting to atoms format with accurate line numbers...");
     println!("  Parsing source files with verus_syn for accurate function spans...");
 
-    let atoms =
-        convert_to_atoms_with_parsed_spans(&call_graph, &symbol_to_display_name, &project_path);
+    let atoms = convert_to_atoms_with_parsed_spans(
+        &call_graph,
+        &symbol_to_display_name,
+        &project_path,
+        with_locations,
+    );
     println!("  ✓ Converted {} functions to atoms format", atoms.len());
+    if with_locations {
+        println!("    (including dependencies-with-locations)");
+    }
 
     // Check for duplicate scip_names - these are now a fatal error
     let duplicates = find_duplicate_scip_names(&atoms);
@@ -1143,8 +1159,13 @@ fn run_atomize_internal(
         .map_err(|e| format!("Failed to parse SCIP JSON: {}", e))?;
 
     let (call_graph, symbol_to_display_name) = build_call_graph(&scip_index);
-    let atoms =
-        convert_to_atoms_with_parsed_spans(&call_graph, &symbol_to_display_name, project_path);
+    // For `run` command, default to basic output (no locations)
+    let atoms = convert_to_atoms_with_parsed_spans(
+        &call_graph,
+        &symbol_to_display_name,
+        project_path,
+        false,
+    );
 
     // Check for duplicates
     let duplicates = find_duplicate_scip_names(&atoms);
@@ -1224,8 +1245,9 @@ fn main() {
             project_path,
             output,
             regenerate_scip,
+            with_locations,
         } => {
-            cmd_atomize(project_path, output, regenerate_scip);
+            cmd_atomize(project_path, output, regenerate_scip, with_locations);
         }
         Commands::ListFunctions {
             path,
