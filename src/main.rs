@@ -14,7 +14,7 @@ use probe_verus::{
     verification::{enrich_with_scip_names, AnalysisStatus, VerificationAnalyzer, VerusRunner},
     verus_parser::{self, ParsedOutput},
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 #[derive(Parser)]
@@ -878,13 +878,19 @@ fn cmd_run(
 ) {
     // Validate project path
     if !project_path.exists() {
-        eprintln!("Error: Project path does not exist: {}", project_path.display());
+        eprintln!(
+            "Error: Project path does not exist: {}",
+            project_path.display()
+        );
         std::process::exit(1);
     }
 
     let cargo_toml = project_path.join("Cargo.toml");
     if !cargo_toml.exists() {
-        eprintln!("Error: Not a valid Rust project (Cargo.toml not found): {}", project_path.display());
+        eprintln!(
+            "Error: Not a valid Rust project (Cargo.toml not found): {}",
+            project_path.display()
+        );
         std::process::exit(1);
     }
 
@@ -921,8 +927,9 @@ fn cmd_run(
         println!("───────────────────────────────────────────────────────────────");
         println!();
 
-        let atomize_result = run_atomize_internal(&project_path, &atoms_path, regenerate_scip, verbose);
-        
+        let atomize_result =
+            run_atomize_internal(&project_path, &atoms_path, regenerate_scip, verbose);
+
         match &atomize_result {
             Ok(count) => {
                 println!("  ✓ Atomize completed: {} functions", count);
@@ -959,7 +966,11 @@ fn cmd_run(
             &project_path,
             &results_path,
             package.as_deref(),
-            if atoms_path.exists() { Some(&atoms_path) } else { None },
+            if atoms_path.exists() {
+                Some(&atoms_path)
+            } else {
+                None
+            },
             verbose,
         );
 
@@ -971,7 +982,7 @@ fn cmd_run(
                 println!("    Failed:     {}", summary.failed);
                 println!("    Unverified: {}", summary.unverified);
                 println!("  → {}", results_path.display());
-                
+
                 run_result.verify = Some(VerifyResult {
                     success: true,
                     output_file: results_path.display().to_string(),
@@ -1005,7 +1016,7 @@ fn cmd_run(
     println!("  Summary");
     println!("═══════════════════════════════════════════════════════════════");
     println!();
-    
+
     if let Some(ref a) = run_result.atomize {
         if a.success {
             println!("  atomize: ✓ Success → {}", a.output_file);
@@ -1013,7 +1024,7 @@ fn cmd_run(
             println!("  atomize: ✗ Failed");
         }
     }
-    
+
     if let Some(ref v) = run_result.verify {
         if v.success {
             println!("  verify:  ✓ Success → {}", v.output_file);
@@ -1021,7 +1032,7 @@ fn cmd_run(
             println!("  verify:  ✗ Failed");
         }
     }
-    
+
     println!();
     println!("  Status: {}", run_result.status);
     println!();
@@ -1071,13 +1082,26 @@ fn run_atomize_internal(
         let scip_status = Command::new("verus-analyzer")
             .args(["scip", "."])
             .current_dir(project_path)
-            .stdout(if verbose { Stdio::inherit() } else { Stdio::null() })
-            .stderr(if verbose { Stdio::inherit() } else { Stdio::null() })
+            .stdout(if verbose {
+                Stdio::inherit()
+            } else {
+                Stdio::null()
+            })
+            .stderr(if verbose {
+                Stdio::inherit()
+            } else {
+                Stdio::null()
+            })
             .status();
 
         match scip_status {
             Ok(status) if status.success() => {}
-            Ok(status) => return Err(format!("verus-analyzer scip failed with status: {}", status)),
+            Ok(status) => {
+                return Err(format!(
+                    "verus-analyzer scip failed with status: {}",
+                    status
+                ))
+            }
             Err(e) => return Err(format!("Failed to run verus-analyzer: {}", e)),
         }
 
@@ -1119,7 +1143,8 @@ fn run_atomize_internal(
         .map_err(|e| format!("Failed to parse SCIP JSON: {}", e))?;
 
     let (call_graph, symbol_to_display_name) = build_call_graph(&scip_index);
-    let atoms = convert_to_atoms_with_parsed_spans(&call_graph, &symbol_to_display_name, project_path);
+    let atoms =
+        convert_to_atoms_with_parsed_spans(&call_graph, &symbol_to_display_name, project_path);
 
     // Check for duplicates
     let duplicates = find_duplicate_scip_names(&atoms);
@@ -1137,22 +1162,21 @@ fn run_atomize_internal(
 
     let json = serde_json::to_string_pretty(&atoms_dict)
         .map_err(|e| format!("Failed to serialize JSON: {}", e))?;
-    std::fs::write(output, &json)
-        .map_err(|e| format!("Failed to write output: {}", e))?;
+    std::fs::write(output, &json).map_err(|e| format!("Failed to write output: {}", e))?;
 
     Ok(count)
 }
 
 /// Internal verify implementation that returns Result for better error handling
 fn run_verify_internal(
-    project_path: &PathBuf,
-    output: &PathBuf,
+    project_path: &Path,
+    output: &Path,
     package: Option<&str>,
-    atoms_path: Option<&PathBuf>,
+    atoms_path: Option<&Path>,
     verbose: bool,
 ) -> Result<VerifySummary, String> {
     let runner = VerusRunner::new();
-    
+
     let (verification_output, exit_code) = runner
         .run_verification(project_path, package, None, None, None)
         .map_err(|e| format!("Failed to run verification: {}", e))?;
@@ -1182,8 +1206,7 @@ fn run_verify_internal(
     // Write results
     let json = serde_json::to_string_pretty(&result)
         .map_err(|e| format!("Failed to serialize JSON: {}", e))?;
-    std::fs::write(output, &json)
-        .map_err(|e| format!("Failed to write output: {}", e))?;
+    std::fs::write(output, &json).map_err(|e| format!("Failed to write output: {}", e))?;
 
     Ok(VerifySummary {
         total_functions: result.summary.total_functions,
