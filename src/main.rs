@@ -5,6 +5,7 @@
 //! - `list-functions`: List all functions in a Rust/Verus project
 //! - `verify`: Run Verus verification and analyze results (or analyze existing output)
 //! - `specify`: Extract function specifications (requires/ensures) to JSON
+//! - `run`: Run both atomize and verify (designed for Docker/CI usage)
 
 use clap::{Parser, Subcommand};
 use probe_verus::{
@@ -125,6 +126,39 @@ enum Commands {
         /// Path to atoms.json file for scip-name lookup (required for dictionary output)
         #[arg(long)]
         with_scip_names: PathBuf,
+    },
+
+    /// Run both atomize and verify commands (designed for Docker/CI usage)
+    ///
+    /// This is the recommended entrypoint for Docker containers and CI pipelines.
+    /// It runs atomize followed by verify, with proper error handling and JSON output.
+    Run {
+        /// Path to the Rust/Verus project
+        project_path: PathBuf,
+
+        /// Output directory for results (default: ./output)
+        #[arg(short, long, default_value = "./output")]
+        output: PathBuf,
+
+        /// Run only the atomize command
+        #[arg(long)]
+        atomize_only: bool,
+
+        /// Run only the verify command
+        #[arg(long)]
+        verify_only: bool,
+
+        /// Package name for workspace projects (passed to verify)
+        #[arg(short, long)]
+        package: Option<String>,
+
+        /// Force regeneration of the SCIP index
+        #[arg(long)]
+        regenerate_scip: bool,
+
+        /// Enable verbose output
+        #[arg(short, long)]
+        verbose: bool,
     },
 }
 
@@ -801,6 +835,364 @@ fn cmd_specify(path: PathBuf, output: PathBuf, atoms_path: PathBuf) {
     );
 }
 
+/// Result of the run command for JSON output
+#[derive(serde::Serialize)]
+struct RunResult {
+    status: String,
+    atomize: Option<AtomizeResult>,
+    verify: Option<VerifyResult>,
+}
+
+#[derive(serde::Serialize)]
+struct AtomizeResult {
+    success: bool,
+    output_file: String,
+    total_functions: Option<usize>,
+    error: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct VerifyResult {
+    success: bool,
+    output_file: String,
+    summary: Option<VerifySummary>,
+    error: Option<String>,
+}
+
+#[derive(serde::Serialize, Clone)]
+struct VerifySummary {
+    total_functions: usize,
+    verified: usize,
+    failed: usize,
+    unverified: usize,
+}
+
+fn cmd_run(
+    project_path: PathBuf,
+    output_dir: PathBuf,
+    atomize_only: bool,
+    verify_only: bool,
+    package: Option<String>,
+    regenerate_scip: bool,
+    verbose: bool,
+) {
+    // Validate project path
+    if !project_path.exists() {
+        eprintln!("Error: Project path does not exist: {}", project_path.display());
+        std::process::exit(1);
+    }
+
+    let cargo_toml = project_path.join("Cargo.toml");
+    if !cargo_toml.exists() {
+        eprintln!("Error: Not a valid Rust project (Cargo.toml not found): {}", project_path.display());
+        std::process::exit(1);
+    }
+
+    // Create output directory
+    if let Err(e) = std::fs::create_dir_all(&output_dir) {
+        eprintln!("Error: Failed to create output directory: {}", e);
+        std::process::exit(1);
+    }
+
+    let atoms_path = output_dir.join("atoms.json");
+    let results_path = output_dir.join("results.json");
+
+    println!("═══════════════════════════════════════════════════════════════");
+    println!("  probe-verus run");
+    println!("═══════════════════════════════════════════════════════════════");
+    println!();
+    println!("  Project: {}", project_path.display());
+    println!("  Output:  {}", output_dir.display());
+    if let Some(ref pkg) = package {
+        println!("  Package: {}", pkg);
+    }
+    println!();
+
+    let mut run_result = RunResult {
+        status: "success".to_string(),
+        atomize: None,
+        verify: None,
+    };
+
+    // === Run atomize ===
+    if !verify_only {
+        println!("───────────────────────────────────────────────────────────────");
+        println!("  Step 1: Atomize (generate call graph)");
+        println!("───────────────────────────────────────────────────────────────");
+        println!();
+
+        let atomize_result = run_atomize_internal(&project_path, &atoms_path, regenerate_scip, verbose);
+        
+        match &atomize_result {
+            Ok(count) => {
+                println!("  ✓ Atomize completed: {} functions", count);
+                println!("  → {}", atoms_path.display());
+                run_result.atomize = Some(AtomizeResult {
+                    success: true,
+                    output_file: atoms_path.display().to_string(),
+                    total_functions: Some(*count),
+                    error: None,
+                });
+            }
+            Err(e) => {
+                eprintln!("  ✗ Atomize failed: {}", e);
+                run_result.status = "atomize_failed".to_string();
+                run_result.atomize = Some(AtomizeResult {
+                    success: false,
+                    output_file: atoms_path.display().to_string(),
+                    total_functions: None,
+                    error: Some(e.clone()),
+                });
+            }
+        }
+        println!();
+    }
+
+    // === Run verify ===
+    if !atomize_only {
+        println!("───────────────────────────────────────────────────────────────");
+        println!("  Step 2: Verify (run Verus verification)");
+        println!("───────────────────────────────────────────────────────────────");
+        println!();
+
+        let verify_result = run_verify_internal(
+            &project_path,
+            &results_path,
+            package.as_deref(),
+            if atoms_path.exists() { Some(&atoms_path) } else { None },
+            verbose,
+        );
+
+        match &verify_result {
+            Ok(summary) => {
+                println!("  ✓ Verify completed");
+                println!("    Total:      {}", summary.total_functions);
+                println!("    Verified:   {}", summary.verified);
+                println!("    Failed:     {}", summary.failed);
+                println!("    Unverified: {}", summary.unverified);
+                println!("  → {}", results_path.display());
+                
+                run_result.verify = Some(VerifyResult {
+                    success: true,
+                    output_file: results_path.display().to_string(),
+                    summary: Some(summary.clone()),
+                    error: None,
+                });
+
+                // Mark as verification_failed if there are failures
+                if summary.failed > 0 && run_result.status == "success" {
+                    run_result.status = "verification_failed".to_string();
+                }
+            }
+            Err(e) => {
+                eprintln!("  ✗ Verify failed: {}", e);
+                if run_result.status == "success" {
+                    run_result.status = "verify_failed".to_string();
+                }
+                run_result.verify = Some(VerifyResult {
+                    success: false,
+                    output_file: results_path.display().to_string(),
+                    summary: None,
+                    error: Some(e.clone()),
+                });
+            }
+        }
+        println!();
+    }
+
+    // === Summary ===
+    println!("═══════════════════════════════════════════════════════════════");
+    println!("  Summary");
+    println!("═══════════════════════════════════════════════════════════════");
+    println!();
+    
+    if let Some(ref a) = run_result.atomize {
+        if a.success {
+            println!("  atomize: ✓ Success → {}", a.output_file);
+        } else {
+            println!("  atomize: ✗ Failed");
+        }
+    }
+    
+    if let Some(ref v) = run_result.verify {
+        if v.success {
+            println!("  verify:  ✓ Success → {}", v.output_file);
+        } else {
+            println!("  verify:  ✗ Failed");
+        }
+    }
+    
+    println!();
+    println!("  Status: {}", run_result.status);
+    println!();
+
+    // Write summary JSON
+    let summary_path = output_dir.join("run_summary.json");
+    if let Ok(json) = serde_json::to_string_pretty(&run_result) {
+        if let Err(e) = std::fs::write(&summary_path, &json) {
+            eprintln!("Warning: Could not write summary: {}", e);
+        }
+    }
+
+    // Exit with appropriate code
+    let exit_code = match run_result.status.as_str() {
+        "success" => 0,
+        "verification_failed" => 0, // Verification ran successfully, just found failures
+        _ => 1,
+    };
+    std::process::exit(exit_code);
+}
+
+/// Internal atomize implementation that returns Result for better error handling
+fn run_atomize_internal(
+    project_path: &PathBuf,
+    output: &PathBuf,
+    regenerate_scip: bool,
+    verbose: bool,
+) -> Result<usize, String> {
+    // Check for existing SCIP JSON
+    let data_dir = project_path.join("data");
+    let cached_scip_path = data_dir.join("index.scip");
+    let cached_json_path = data_dir.join("index.scip.json");
+
+    // Generate SCIP if needed
+    if !cached_json_path.exists() || regenerate_scip {
+        if !check_command_exists("verus-analyzer") {
+            return Err("verus-analyzer not found in PATH".to_string());
+        }
+        if !check_command_exists("scip") {
+            return Err("scip not found in PATH".to_string());
+        }
+
+        if verbose {
+            println!("    Generating SCIP index...");
+        }
+
+        let scip_status = Command::new("verus-analyzer")
+            .args(["scip", "."])
+            .current_dir(project_path)
+            .stdout(if verbose { Stdio::inherit() } else { Stdio::null() })
+            .stderr(if verbose { Stdio::inherit() } else { Stdio::null() })
+            .status();
+
+        match scip_status {
+            Ok(status) if status.success() => {}
+            Ok(status) => return Err(format!("verus-analyzer scip failed with status: {}", status)),
+            Err(e) => return Err(format!("Failed to run verus-analyzer: {}", e)),
+        }
+
+        let generated_scip_path = project_path.join("index.scip");
+        if !generated_scip_path.exists() {
+            return Err("index.scip not generated".to_string());
+        }
+
+        // Move to data directory
+        if let Err(e) = std::fs::create_dir_all(&data_dir) {
+            return Err(format!("Failed to create data directory: {}", e));
+        }
+        if let Err(e) = std::fs::rename(&generated_scip_path, &cached_scip_path) {
+            return Err(format!("Failed to move index.scip: {}", e));
+        }
+
+        // Convert to JSON
+        if verbose {
+            println!("    Converting to JSON...");
+        }
+
+        let scip_output = Command::new("scip")
+            .args(["print", "--json", cached_scip_path.to_str().unwrap()])
+            .output();
+
+        match scip_output {
+            Ok(output) if output.status.success() => {
+                if let Err(e) = std::fs::write(&cached_json_path, output.stdout) {
+                    return Err(format!("Failed to write SCIP JSON: {}", e));
+                }
+            }
+            Ok(output) => return Err(format!("scip print failed: {}", output.status)),
+            Err(e) => return Err(format!("Failed to run scip: {}", e)),
+        }
+    }
+
+    // Parse and build call graph
+    let scip_index = parse_scip_json(cached_json_path.to_str().unwrap())
+        .map_err(|e| format!("Failed to parse SCIP JSON: {}", e))?;
+
+    let (call_graph, symbol_to_display_name) = build_call_graph(&scip_index);
+    let atoms = convert_to_atoms_with_parsed_spans(&call_graph, &symbol_to_display_name, project_path);
+
+    // Check for duplicates
+    let duplicates = find_duplicate_scip_names(&atoms);
+    if !duplicates.is_empty() {
+        return Err(format!("Found {} duplicate scip_name(s)", duplicates.len()));
+    }
+
+    let count = atoms.len();
+
+    // Convert to dictionary and write
+    let atoms_dict: std::collections::HashMap<String, _> = atoms
+        .into_iter()
+        .map(|atom| (atom.scip_name.clone(), atom))
+        .collect();
+
+    let json = serde_json::to_string_pretty(&atoms_dict)
+        .map_err(|e| format!("Failed to serialize JSON: {}", e))?;
+    std::fs::write(output, &json)
+        .map_err(|e| format!("Failed to write output: {}", e))?;
+
+    Ok(count)
+}
+
+/// Internal verify implementation that returns Result for better error handling
+fn run_verify_internal(
+    project_path: &PathBuf,
+    output: &PathBuf,
+    package: Option<&str>,
+    atoms_path: Option<&PathBuf>,
+    verbose: bool,
+) -> Result<VerifySummary, String> {
+    let runner = VerusRunner::new();
+    
+    let (verification_output, exit_code) = runner
+        .run_verification(project_path, package, None, None, None)
+        .map_err(|e| format!("Failed to run verification: {}", e))?;
+
+    if verbose {
+        println!("{}", verification_output);
+    }
+
+    let analyzer = VerificationAnalyzer::new();
+    let mut result = analyzer.analyze_output(
+        project_path,
+        &verification_output,
+        Some(exit_code),
+        None,
+        None,
+    );
+
+    // Enrich with scip-names if atoms.json exists
+    if let Some(atoms) = atoms_path {
+        if atoms.exists() {
+            if let Err(e) = enrich_with_scip_names(&mut result, atoms) {
+                eprintln!("    Warning: Failed to enrich with scip-names: {}", e);
+            }
+        }
+    }
+
+    // Write results
+    let json = serde_json::to_string_pretty(&result)
+        .map_err(|e| format!("Failed to serialize JSON: {}", e))?;
+    std::fs::write(output, &json)
+        .map_err(|e| format!("Failed to write output: {}", e))?;
+
+    Ok(VerifySummary {
+        total_functions: result.summary.total_functions,
+        verified: result.summary.verified_functions,
+        failed: result.summary.failed_functions,
+        unverified: result.summary.unverified_functions,
+    })
+}
+
 fn main() {
     let cli = Cli::parse();
 
@@ -860,6 +1252,25 @@ fn main() {
             with_scip_names,
         } => {
             cmd_specify(path, json_output, with_scip_names);
+        }
+        Commands::Run {
+            project_path,
+            output,
+            atomize_only,
+            verify_only,
+            package,
+            regenerate_scip,
+            verbose,
+        } => {
+            cmd_run(
+                project_path,
+                output,
+                atomize_only,
+                verify_only,
+                package,
+                regenerate_scip,
+                verbose,
+            );
         }
     }
 }
