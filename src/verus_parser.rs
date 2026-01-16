@@ -21,6 +21,8 @@ pub struct FunctionSpan {
     pub name: String,
     pub start_line: usize,
     pub end_line: usize,
+    /// Verus function mode: "exec", "proof", or "spec"
+    pub mode: String,
 }
 
 /// Visitor that collects function spans from an AST
@@ -34,6 +36,15 @@ impl FunctionSpanVisitor {
             functions: Vec::new(),
         }
     }
+
+    /// Convert FnMode to a string representation
+    fn mode_to_string(mode: &FnMode) -> String {
+        match mode {
+            FnMode::Spec(_) | FnMode::SpecChecked(_) => "spec".to_string(),
+            FnMode::Proof(_) | FnMode::ProofAxiom(_) => "proof".to_string(),
+            FnMode::Exec(_) | FnMode::Default => "exec".to_string(),
+        }
+    }
 }
 
 impl<'ast> Visit<'ast> for FunctionSpanVisitor {
@@ -42,11 +53,13 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
         let span = node.span();
         let start_line = span.start().line;
         let end_line = span.end().line;
+        let mode = Self::mode_to_string(&node.sig.mode);
 
         self.functions.push(FunctionSpan {
             name,
             start_line,
             end_line,
+            mode,
         });
 
         // Continue visiting nested items
@@ -58,11 +71,13 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
         let span = node.span();
         let start_line = span.start().line;
         let end_line = span.end().line;
+        let mode = Self::mode_to_string(&node.sig.mode);
 
         self.functions.push(FunctionSpan {
             name,
             start_line,
             end_line,
+            mode,
         });
 
         // Continue visiting nested items
@@ -74,11 +89,13 @@ impl<'ast> Visit<'ast> for FunctionSpanVisitor {
         let span = node.span();
         let start_line = span.start().line;
         let end_line = span.end().line;
+        let mode = Self::mode_to_string(&node.sig.mode);
 
         self.functions.push(FunctionSpan {
             name,
             start_line,
             end_line,
+            mode,
         });
 
         // Continue visiting nested items
@@ -229,15 +246,22 @@ pub fn parse_file_for_spans(file_path: &Path) -> Result<Vec<FunctionSpan>, Strin
     Ok(visitor.functions)
 }
 
+/// Span and mode information for a function
+#[derive(Debug, Clone)]
+pub struct SpanAndMode {
+    pub end_line: usize,
+    pub mode: String,
+}
+
 /// Parse all source files in a project and build a lookup map.
 ///
-/// Returns a map from (relative_path, function_name, definition_line) -> end_line.
+/// Returns a map from (relative_path, function_name, definition_line) -> SpanAndMode.
 /// We use definition_line (from SCIP) as part of the key to handle multiple
 /// functions with the same name in the same file (e.g., different impl blocks).
 pub fn build_function_span_map(
     project_root: &Path,
     relative_paths: &[String],
-) -> HashMap<(String, String, usize), usize> {
+) -> HashMap<(String, String, usize), SpanAndMode> {
     let mut span_map = HashMap::new();
 
     for rel_path in relative_paths {
@@ -249,9 +273,15 @@ pub fn build_function_span_map(
         if let Ok(functions) = parse_file_for_spans(&full_path) {
             for func in functions {
                 // Key: (relative_path, function_name, start_line)
-                // Value: end_line
+                // Value: SpanAndMode (end_line + mode)
                 let key = (rel_path.clone(), func.name.clone(), func.start_line);
-                span_map.insert(key, func.end_line);
+                span_map.insert(
+                    key,
+                    SpanAndMode {
+                        end_line: func.end_line,
+                        mode: func.mode,
+                    },
+                );
             }
         }
     }
@@ -264,7 +294,7 @@ pub fn build_function_span_map(
 /// If we can't find an exact match, we try to find a function with the same name
 /// where the SCIP-reported start line falls within the parsed span.
 pub fn get_function_end_line(
-    span_map: &HashMap<(String, String, usize), usize>,
+    span_map: &HashMap<(String, String, usize), SpanAndMode>,
     relative_path: &str,
     function_name: &str,
     start_line: usize,
@@ -275,20 +305,53 @@ pub fn get_function_end_line(
         function_name.to_string(),
         start_line,
     );
-    if let Some(&end_line) = span_map.get(&key) {
-        return Some(end_line);
+    if let Some(span_and_mode) = span_map.get(&key) {
+        return Some(span_and_mode.end_line);
     }
 
     // Try containment match: find a function with the same name in the same file
     // where the SCIP start_line falls within the parsed span [parsed_start, end_line].
     // This works because verus_syn includes attributes/docs in the span, so the
     // actual signature line (what SCIP reports) should be within that span.
-    for ((path, name, parsed_start), &end_line) in span_map.iter() {
+    for ((path, name, parsed_start), span_and_mode) in span_map.iter() {
         if path == relative_path && name == function_name {
             // SCIP's start_line should be within [parsed_start, end_line]
-            if start_line >= *parsed_start && start_line <= end_line {
-                return Some(end_line);
+            if start_line >= *parsed_start && start_line <= span_and_mode.end_line {
+                return Some(span_and_mode.end_line);
             }
+        }
+    }
+
+    None
+}
+
+/// Get the function mode (exec, proof, spec) given its path, name, and start line.
+///
+/// Uses the same lookup strategy as get_function_end_line.
+pub fn get_function_mode(
+    span_map: &HashMap<(String, String, usize), SpanAndMode>,
+    relative_path: &str,
+    function_name: &str,
+    start_line: usize,
+) -> Option<String> {
+    // Try exact match first
+    let key = (
+        relative_path.to_string(),
+        function_name.to_string(),
+        start_line,
+    );
+    if let Some(span_and_mode) = span_map.get(&key) {
+        return Some(span_and_mode.mode.clone());
+    }
+
+    // Try containment match
+    for ((path, name, parsed_start), span_and_mode) in span_map.iter() {
+        if path == relative_path
+            && name == function_name
+            && start_line >= *parsed_start
+            && start_line <= span_and_mode.end_line
+        {
+            return Some(span_and_mode.mode.clone());
         }
     }
 

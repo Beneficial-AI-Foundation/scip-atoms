@@ -105,6 +105,8 @@ pub struct AtomWithLines {
     pub code_path: String,
     #[serde(rename = "code-text")]
     pub code_text: CodeTextInfo,
+    /// Verus function mode: "exec", "proof", or "spec"
+    pub mode: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -891,7 +893,7 @@ pub fn convert_to_atoms_with_parsed_spans(
 fn convert_to_atoms_with_lines_internal(
     call_graph: &HashMap<String, FunctionNode>,
     symbol_to_display_name: &HashMap<String, String>,
-    span_map: Option<&HashMap<(String, String, usize), usize>>,
+    span_map: Option<&HashMap<(String, String, usize), verus_parser::SpanAndMode>>,
 ) -> Vec<AtomWithLines> {
     // === Phase 1: Compute line ranges and base scip_names for all nodes ===
     struct NodeData<'a> {
@@ -899,6 +901,7 @@ fn convert_to_atoms_with_lines_internal(
         lines_start: usize,
         lines_end: usize,
         base_scip_name: String,
+        mode: String,
     }
 
     let node_data: Vec<NodeData> = call_graph
@@ -925,6 +928,19 @@ fn convert_to_atoms_with_lines_internal(
                 }
             };
 
+            // Get mode from span_map (defaults to "exec" if not found)
+            let mode = if let Some(map) = span_map {
+                verus_parser::get_function_mode(
+                    map,
+                    &node.relative_path,
+                    &node.display_name,
+                    lines_start,
+                )
+                .unwrap_or_else(|| "exec".to_string())
+            } else {
+                "exec".to_string()
+            };
+
             // Generate base scip_name WITHOUT line number
             let base_scip_name = symbol_to_scip_name(
                 &node.symbol,
@@ -938,6 +954,7 @@ fn convert_to_atoms_with_lines_internal(
                 lines_start,
                 lines_end,
                 base_scip_name,
+                mode,
             }
         })
         .collect();
@@ -1153,6 +1170,7 @@ fn convert_to_atoms_with_lines_internal(
                     lines_start: data.lines_start,
                     lines_end: data.lines_end,
                 },
+                mode: data.mode.clone(),
             }
         })
         .collect()
