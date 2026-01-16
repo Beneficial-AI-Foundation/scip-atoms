@@ -2,7 +2,7 @@
 
 ## Summary
 
-When multiple trait implementations define the same method name (e.g., `Mul::mul`) for different type combinations, rust-analyzer generates **identical SCIP symbols** for both. This causes scip-atoms to lose one of the implementations when building the call graph, as the second entry overwrites the first in a HashMap.
+When multiple trait implementations define the same method name (e.g., `Mul::mul`) for different type combinations, rust-analyzer generates **identical SCIP symbols** for both. This causes probe-verus to lose one of the implementations when building the call graph, as the second entry overwrites the first in a HashMap.
 
 ## Example: Montgomery Point Multiplication
 

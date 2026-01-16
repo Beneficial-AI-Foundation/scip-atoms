@@ -1,6 +1,6 @@
 # From Trait Dependency Resolution
 
-This document explains how `scip-atoms` resolves calls to `From::from()` to the correct trait implementation.
+This document explains how `probe-verus` resolves calls to `From::from()` to the correct trait implementation.
 
 ## The Challenge
 
@@ -82,7 +82,7 @@ The dependency is ambiguous — it could refer to either the `ProjectiveNielsPoi
 
 ### With Disambiguation (resolved)
 
-scip-atoms enriches the symbols with target type information:
+probe-verus enriches the symbols with target type information:
 ```json
 {
   "scip-name": "vartime_double_base/.../mul()",

@@ -1,13 +1,13 @@
-//! SCIP Atoms - Generate compact call graph data and analyze Verus verification
+//! Probe Verus - Analyze Verus projects: call graphs and verification
 //!
 //! This tool provides multiple subcommands:
-//! - `atoms`: Generate SCIP-based call graph data with line numbers
-//! - `functions`: List all functions in a Rust/Verus project
+//! - `atomize`: Generate call graph atoms with line numbers from SCIP indexes
+//! - `list-functions`: List all functions in a Rust/Verus project
 //! - `verify`: Run Verus verification and analyze results (or analyze existing output)
 //! - `specify`: Extract function specifications (requires/ensures) to JSON
 
 use clap::{Parser, Subcommand};
-use scip_atoms::{
+use probe_verus::{
     build_call_graph, convert_to_atoms_with_parsed_spans, find_duplicate_scip_names,
     parse_scip_json,
     verification::{enrich_with_scip_names, AnalysisStatus, VerificationAnalyzer, VerusRunner},
@@ -17,8 +17,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 #[derive(Parser)]
-#[command(name = "scip-atoms")]
-#[command(author, version, about = "Generate compact call graph data and analyze Verus verification", long_about = None)]
+#[command(name = "probe-verus")]
+#[command(author, version, about = "Probe Verus projects: call graphs and verification analysis", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -26,8 +26,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Generate SCIP-based call graph atoms with line numbers
-    Atoms {
+    /// Generate call graph atoms with line numbers from SCIP indexes
+    Atomize {
         /// Path to the Rust/Verus project
         project_path: PathBuf,
 
@@ -41,7 +41,8 @@ enum Commands {
     },
 
     /// List all functions in a Rust/Verus project
-    Functions {
+    #[command(name = "list-functions")]
+    ListFunctions {
         /// Path to search (file or directory)
         path: PathBuf,
 
@@ -73,6 +74,7 @@ enum Commands {
     /// Run Verus verification and analyze results, or analyze existing output
     ///
     /// If no project_path is given, uses cached verification output from data/verification_output.txt
+    #[command(name = "verify")]
     Verify {
         /// Path to the Rust/Verus project (optional if using cached output)
         project_path: Option<PathBuf>,
@@ -146,9 +148,9 @@ fn check_command_exists(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn cmd_atoms(project_path: PathBuf, output: PathBuf, regenerate_scip: bool) {
+fn cmd_atomize(project_path: PathBuf, output: PathBuf, regenerate_scip: bool) {
     println!("═══════════════════════════════════════════════════════════");
-    println!("  SCIP Atoms - Generate Compact Call Graph Data");
+    println!("  Probe Verus - Atomize: Generate Call Graph Data");
     println!("═══════════════════════════════════════════════════════════");
     println!();
 
@@ -577,7 +579,7 @@ fn cmd_verify(
             },
             Err(_) => {
                 eprintln!("Error: No cached verification found.");
-                eprintln!("Run with a project path first: scip-atoms verify <project-path>");
+                eprintln!("Run with a project path first: probe-verus verify <project-path>");
                 std::process::exit(1);
             }
         };
@@ -803,14 +805,14 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Atoms {
+        Commands::Atomize {
             project_path,
             output,
             regenerate_scip,
         } => {
-            cmd_atoms(project_path, output, regenerate_scip);
+            cmd_atomize(project_path, output, regenerate_scip);
         }
-        Commands::Functions {
+        Commands::ListFunctions {
             path,
             format,
             exclude_verus_constructs,

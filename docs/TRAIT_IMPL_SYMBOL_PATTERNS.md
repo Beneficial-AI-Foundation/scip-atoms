@@ -1,6 +1,6 @@
 # Trait Implementation Symbol Patterns in SCIP
 
-This document explains how rust-analyzer generates SCIP symbols for different trait implementations, and why some cases require special handling in scip-atoms.
+This document explains how rust-analyzer generates SCIP symbols for different trait implementations, and why some cases require special handling in probe-verus.
 
 ## Summary
 
@@ -77,9 +77,9 @@ impl<'a, 'b> Mul<&'b MontgomeryPoint> for &'a Scalar {
 - The symbol path only includes the module (`montgomery`) and trait (`Mul`)
 - Type parameters are stripped from the symbol
 
-## scip-atoms Fix
+## probe-verus Fix
 
-To handle Case 2, scip-atoms uses the `signature_documentation.text` field to distinguish implementations with identical symbols.
+To handle Case 2, probe-verus uses the `signature_documentation.text` field to distinguish implementations with identical symbols.
 
 ### How It Works
 
@@ -125,7 +125,7 @@ impl<'a> From<&'a EdwardsPoint> for LookupTable<ProjectiveNielsPoint> { ... }
 
 Both generate: `window/LookupTable#From#from()`
 
-### scip-atoms Fix for From
+### probe-verus Fix for From
 
 1. **Extract source type**: From the first parameter `fn from(value: T)`, extract `T`
 2. **Preserve references**: Keep `&` to distinguish `From<&T>` from `From<T>`

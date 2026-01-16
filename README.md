@@ -1,6 +1,6 @@
-# scip-atoms
+# probe-verus
 
-Generate compact function call graph data from SCIP indexes and analyze Verus verification results.
+Probe Verus projects: generate call graph atoms and analyze verification results.
 
 ## Installation
 
@@ -14,22 +14,22 @@ See [INSTALL.md](INSTALL.md) for detailed installation instructions.
 ## Commands
 
 ```
-scip-atoms <COMMAND>
+probe-verus <COMMAND>
 
 Commands:
-  atoms      Generate SCIP-based call graph atoms with line numbers
-  functions  List all functions in a Rust/Verus project
-  verify     Run Verus verification and analyze results
+  atomize         Generate call graph atoms with line numbers from SCIP indexes
+  list-functions  List all functions in a Rust/Verus project
+  verify          Run Verus verification and analyze results
 ```
 
 ---
 
-### `atoms` - Generate Call Graph Data
+### `atomize` - Generate Call Graph Data
 
-Generate SCIP-based call graph atoms with line numbers.
+Generate call graph atoms with line numbers from SCIP indexes.
 
 ```bash
-scip-atoms atoms <PROJECT_PATH> [OPTIONS]
+probe-verus atomize <PROJECT_PATH> [OPTIONS]
 
 Options:
   -o, --output <FILE>     Output file path (default: atoms.json)
@@ -38,21 +38,21 @@ Options:
 
 **Examples:**
 ```bash
-scip-atoms atoms ./my-rust-project
-scip-atoms atoms ./my-rust-project -o output.json
-scip-atoms atoms ./my-rust-project --regenerate-scip
+probe-verus atomize ./my-rust-project
+probe-verus atomize ./my-rust-project -o output.json
+probe-verus atomize ./my-rust-project --regenerate-scip
 ```
 
 **Output format:**
 
-The output is a dictionary keyed by `scip-name` (a URI-style identifier):
+The output is a dictionary keyed by `probe-name` (a URI-style identifier):
 
 ```json
 {
-  "scip:curve25519-dalek/4.1.3/module/MyType#my_function()": {
+  "probe:curve25519-dalek/4.1.3/module/MyType#my_function()": {
     "display-name": "my_function",
     "dependencies": [
-      "scip:curve25519-dalek/4.1.3/other_module/helper()"
+      "probe:curve25519-dalek/4.1.3/other_module/helper()"
     ],
     "code-module": "module",
     "code-path": "src/lib.rs",
@@ -62,23 +62,23 @@ The output is a dictionary keyed by `scip-name` (a URI-style identifier):
 ```
 
 **Field descriptions:**
-- **Key (`scip-name`)**: URI-style identifier in format `scip:<crate>/<version>/<module>/<Type>#<method>()`
+- **Key (`probe-name`)**: URI-style identifier in format `probe:<crate>/<version>/<module>/<Type>#<method>()`
 - **`display-name`**: The function/method name
-- **`dependencies`**: List of scip-names this function calls
+- **`dependencies`**: List of probe-names this function calls
 - **`code-module`**: The module path (e.g., `"foo/bar"` for nested modules, empty for top-level)
 - **`code-path`**: Relative file path
 - **`code-text`**: Line range of the function body
 
-**Note:** Duplicate `scip-name` values are a fatal error (exit code 1).
+**Note:** Duplicate `probe-name` values are a fatal error (exit code 1).
 
 ---
 
-### `functions` - List Functions
+### `list-functions` - List Functions
 
 List all functions in a Rust/Verus project with optional metadata.
 
 ```bash
-scip-atoms functions <PATH> [OPTIONS]
+probe-verus list-functions <PATH> [OPTIONS]
 
 Options:
   -f, --format <FORMAT>          text, json, or detailed (default: text)
@@ -91,9 +91,9 @@ Options:
 
 **Examples:**
 ```bash
-scip-atoms functions ./src
-scip-atoms functions ./src --format detailed --show-visibility --show-kind
-scip-atoms functions ./my-project --format json
+probe-verus list-functions ./src
+probe-verus list-functions ./src --format detailed --show-visibility --show-kind
+probe-verus list-functions ./my-project --format json
 ```
 
 ---
@@ -103,7 +103,7 @@ scip-atoms functions ./my-project --format json
 Run Verus verification on a project and analyze results. Supports caching for quick re-analysis.
 
 ```bash
-scip-atoms verify [PROJECT_PATH] [OPTIONS]
+probe-verus verify [PROJECT_PATH] [OPTIONS]
 
 Options:
       --from-file <FILE>         Analyze existing output file instead of running verification
@@ -120,27 +120,27 @@ Options:
 
 ```bash
 # First run: runs verification and caches output to data/
-scip-atoms verify ./my-verus-project -p my-crate
+probe-verus verify ./my-verus-project -p my-crate
 
 # Subsequent runs: uses cached output (no need to re-run verification)
-scip-atoms verify
+probe-verus verify
 ```
 
 **Examples:**
 ```bash
 # Run verification (caches output automatically)
-scip-atoms verify ./my-verus-project
-scip-atoms verify ./my-workspace -p my-crate
+probe-verus verify ./my-verus-project
+probe-verus verify ./my-workspace -p my-crate
 
 # Use cached output (no project path needed)
-scip-atoms verify
+probe-verus verify
 
 # Analyze existing output file (from CI, etc.)
-scip-atoms verify ./my-project --from-file verification_output.txt
+probe-verus verify ./my-project --from-file verification_output.txt
 
-# Enrich results with scip-names from atoms.json
-scip-atoms verify --with-scip-names
-scip-atoms verify --with-scip-names path/to/atoms.json
+# Enrich results with probe-names from atoms.json
+probe-verus verify --with-scip-names
+probe-verus verify --with-scip-names path/to/atoms.json
 ```
 
 **Function Categorization:**
@@ -164,7 +164,7 @@ Functions with `requires`/`ensures` are categorized as:
     "failed_functions": [
       {
         "display-name": "my_function",
-        "scip-name": "scip:crate/1.0.0/module/my_function()",
+        "scip-name": "probe:crate/1.0.0/module/my_function()",
         "code-path": "src/lib.rs",
         "code-text": { "lines-start": 10, "lines-end": 20 }
       }
@@ -175,7 +175,7 @@ Functions with `requires`/`ensures` are categorized as:
 }
 ```
 
-Note: `scip-name` is only present when using `--with-scip-names` and uses the URI format `scip:<crate>/<version>/<path>`.
+Note: `scip-name` is only present when using `--with-scip-names` and uses the URI format `probe:<crate>/<version>/<path>`.
 
 ---
 

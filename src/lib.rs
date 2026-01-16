@@ -670,17 +670,17 @@ fn is_missing_self_type(symbol: &str) -> bool {
     hash_count == 1
 }
 
-/// Extract the module path from a scip_name.
+/// Extract the module path from a probe_name.
 ///
-/// Given a scip_name like "scip:curve25519-dalek/4.1.3/montgomery/MontgomeryPoint#ct_eq()",
+/// Given a probe_name like "probe:curve25519-dalek/4.1.3/montgomery/MontgomeryPoint#ct_eq()",
 /// extracts the module path (everything between version and the type name).
 ///
-/// Example: "scip:curve25519-dalek/4.1.3/montgomery/MontgomeryPoint#ct_eq()" -> "montgomery"
-/// Example: "scip:crate/0.1.0/foo/bar/Baz#method()" -> "foo/bar"
-/// Example: "scip:crate/0.1.0/TopLevel#method()" -> "" (no module path)
-fn extract_code_module(scip_name: &str) -> String {
-    // Strip "scip:" prefix
-    let s = scip_name.strip_prefix("scip:").unwrap_or(scip_name);
+/// Example: "probe:curve25519-dalek/4.1.3/montgomery/MontgomeryPoint#ct_eq()" -> "montgomery"
+/// Example: "probe:crate/0.1.0/foo/bar/Baz#method()" -> "foo/bar"
+/// Example: "probe:crate/0.1.0/TopLevel#method()" -> "" (no module path)
+fn extract_code_module(probe_name: &str) -> String {
+    // Strip "probe:" prefix
+    let s = probe_name.strip_prefix("probe:").unwrap_or(probe_name);
 
     // Find the position of "#" which marks the type/method boundary
     let hash_pos = s.find('#').unwrap_or(s.len());
@@ -843,10 +843,10 @@ fn symbol_to_scip_name_full(
         result = format!("{}@{}", result, line);
     }
 
-    // Convert to scip: URI format
+    // Convert to probe: URI format
     // "curve25519-dalek 4.1.3 montgomery/MontgomeryPoint#ct_eq()"
-    // becomes "scip:curve25519-dalek/4.1.3/montgomery/MontgomeryPoint#ct_eq()"
-    format!("scip:{}", result.replace(' ', "/"))
+    // becomes "probe:curve25519-dalek/4.1.3/montgomery/MontgomeryPoint#ct_eq()"
+    format!("probe:{}", result.replace(' ', "/"))
 }
 
 /// Convert call graph to atoms with line numbers format.

@@ -1,6 +1,6 @@
 # How It Works
 
-This document explains the internals of scip-atoms and how each command works.
+This document explains the internals of probe-verus and how each command works.
 
 ---
 

@@ -1,11 +1,11 @@
 # Reusable workflow for generating call graph atoms from Rust/Verus projects
 # 
-# Uses scip-atoms to generate compact function call graph data from any Rust/Verus repository.
+# Uses probe-verus to generate compact function call graph data from any Rust/Verus repository.
 #
 # Usage - analyze a specific external repo:
 #   jobs:
 #     generate-dalek:
-#       uses: Beneficial-AI-Foundation/scip-atoms/.github/workflows/generate-atoms.yml@main
+#       uses: Beneficial-AI-Foundation/probe-verus/.github/workflows/generate-atoms.yml@main
 #       with:
 #         target_repo: Beneficial-AI-Foundation/dalek-lite
 #         artifact_name: dalek-atoms
@@ -20,7 +20,7 @@
 #               name: dalek
 #             - repo: some-org/other-verus-project
 #               name: other
-#       uses: Beneficial-AI-Foundation/scip-atoms/.github/workflows/generate-atoms.yml@main
+#       uses: Beneficial-AI-Foundation/probe-verus/.github/workflows/generate-atoms.yml@main
 #       with:
 #         target_repo: ${{ matrix.repo }}
 #         artifact_name: ${{ matrix.name }}-atoms
@@ -28,7 +28,7 @@
 # For non-Verus Rust projects, use rust-analyzer:
 #   jobs:
 #     generate:
-#       uses: Beneficial-AI-Foundation/scip-atoms/.github/workflows/generate-atoms.yml@main
+#       uses: Beneficial-AI-Foundation/probe-verus/.github/workflows/generate-atoms.yml@main
 #       with:
 #         target_repo: rust-lang/some-rust-project
 #         use_rust_analyzer: true
@@ -89,9 +89,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin
-          key: ${{ runner.os }}-cargo-scip-atoms-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-probe-verus-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-scip-atoms-
+            ${{ runner.os }}-cargo-probe-verus-
 
       - name: Install verus-analyzer
         if: ${{ !inputs.use_rust_analyzer }}
@@ -119,15 +119,15 @@ jobs:
           sudo mv scip /usr/local/bin/
           scip --version
 
-      - name: Install scip-atoms
+      - name: Install probe-verus
         run: |
-          cargo install --force --git https://github.com/Beneficial-AI-Foundation/scip-atoms
+          cargo install --force --git https://github.com/Beneficial-AI-Foundation/probe-verus
 
       - name: Generate atoms
         working-directory: project/${{ inputs.project_path }}
         run: |
           mkdir -p ${{ github.workspace }}/output
-          scip-atoms atoms . -o ${{ github.workspace }}/output/atoms.json
+          probe-verus atomize . -o ${{ github.workspace }}/output/atoms.json
           echo "Generated atoms.json:"
           ls -la ${{ github.workspace }}/output/atoms.json
           echo "Preview (first 50 lines):"
@@ -139,4 +139,5 @@ jobs:
           name: ${{ inputs.artifact_name }}
           path: ${{ github.workspace }}/output/atoms.json
           retention-days: 30
+
 

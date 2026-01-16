@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-scip-atoms is a Rust CLI tool that generates compact function call graph data from SCIP (Source Code Index Protocol) indexes and analyzes Verus verification results. It has four subcommands:
-- **atoms**: Generate SCIP-based call graphs with accurate line numbers
-- **functions**: List all functions in a Rust/Verus project (no external tools needed)
+probe-verus is a Rust CLI tool that generates compact function call graph data from SCIP (Source Code Index Protocol) indexes and analyzes Verus verification results. It has four subcommands:
+- **atomize**: Generate call graph atoms with accurate line numbers
+- **list-functions**: List all functions in a Rust/Verus project (no external tools needed)
 - **verify**: Run Verus verification and analyze results
 - **specify**: Extract function specifications from atoms.json
 
@@ -46,8 +46,8 @@ src/
 
 ### Three Main Pipelines
 
-1. **Atoms Pipeline** (`atoms` command): SCIP JSON → call graph parsing → spans via verus_syn → JSON output
-2. **Functions Pipeline** (`functions` command): Source files → AST visitor → function list
+1. **Atomize Pipeline** (`atomize` command): SCIP JSON → call graph parsing → spans via verus_syn → JSON output
+2. **List Functions Pipeline** (`list-functions` command): Source files → AST visitor → function list
 3. **Verification Pipeline** (`verify` command): Cargo verus output → error parsing → function mapping → analysis
 
 ### Key Architectural Patterns
@@ -69,8 +69,8 @@ src/
 
 ## External Tool Dependencies
 
-- **atoms command**: Requires `verus-analyzer` and `scip` CLI
-- **functions command**: None (uses verus_syn only)
+- **atomize command**: Requires `verus-analyzer` and `scip` CLI
+- **list-functions command**: None (uses verus_syn only)
 - **verify command**: Requires `cargo verus`
 
 ## Before Committing
@@ -86,6 +86,6 @@ cargo fmt --all && cargo clippy --all-targets -- -D warnings
 Use conventional commits: `feat(module):`, `fix(module):`, `perf(module):`, `refactor(module):`
 
 Examples from history:
-- `feat(specify): output dictionary keyed by scip-name from atoms.json`
+- `feat(specify): output dictionary keyed by probe-name from atoms.json`
 - `fix(verification): update atoms.json reader for new schema`
 - `perf(verify): use interval tree for error-to-function mapping`

@@ -1,9 +1,9 @@
-use scip_atoms::{
+use probe_verus::{
     build_call_graph, convert_to_atoms_with_lines, find_duplicate_scip_names, parse_scip_json,
 };
 
 fn get_test_data() -> (
-    std::collections::HashMap<String, scip_atoms::FunctionNode>,
+    std::collections::HashMap<String, probe_verus::FunctionNode>,
     std::collections::HashMap<String, String>,
 ) {
     let scip_data = parse_scip_json("data/curve_top.json").expect("Failed to parse SCIP JSON");

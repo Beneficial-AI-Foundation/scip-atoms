@@ -1,17 +1,17 @@
 [workspace]
 
 [package]
-name = "scip-atoms"
+name = "probe-verus"
 version = "0.1.0"
 edition = "2021"
-description = "Generate compact function call graph data with line numbers from SCIP indexes"
+description = "Probe Verus projects: generate call graph atoms and analyze verification results"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/yourusername/scip-atoms"
-keywords = ["scip", "verus-analyzer", "call-graph", "code-analysis", "atoms"]
+repository = "https://github.com/Beneficial-AI-Foundation/probe-verus"
+keywords = ["verus", "verification", "call-graph", "code-analysis", "proof"]
 categories = ["development-tools", "command-line-utilities"]
 
 [[bin]]
-name = "scip-atoms"
+name = "probe-verus"
 path = "src/main.rs"
 
 [dependencies]

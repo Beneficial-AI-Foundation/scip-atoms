@@ -79,9 +79,9 @@ This breaks tools that expect unique symbols for distinct implementations.
 
 SCIP consumers cannot reliably construct or predict symbol paths without knowing whether the implementation uses an owned or reference Self type.
 
-## Fix in scip-atoms
+## Fix in probe-verus
 
-The scip-atoms tool **repairs** verus-analyzer's inconsistent symbols by:
+The probe-verus tool **repairs** verus-analyzer's inconsistent symbols by:
 
 1. **Disambiguation**: Using `signature_documentation.text` as a secondary key to distinguish implementations with identical symbols
 2. **Self type insertion**: Extracting the Self type from `method().(self)` parameter symbols and inserting it into the symbol path
@@ -100,7 +100,7 @@ let self_type = extract_self_type("self: Scalar");           // -> "Scalar"
 
 ### Result after repair
 
-| Original verus-analyzer | Repaired scip-atoms | rust-analyzer equivalent |
+| Original verus-analyzer | Repaired probe-verus | rust-analyzer equivalent |
 |------------------------|---------------------|-------------------------|
 | `montgomery/Mul#mul().` | `montgomery/&MontgomeryPoint#Mul<Scalar>#mul()` | `` montgomery/impl#[`&MontgomeryPoint`][`Mul<&Scalar>`]mul(). `` |
 | `montgomery/Mul#mul().` (duplicate!) | `montgomery/&Scalar#Mul<MontgomeryPoint>#mul()` | `` montgomery/impl#[`&Scalar`][`Mul<&MontgomeryPoint>`]mul(). `` |
@@ -118,7 +118,7 @@ This produces **unique symbols** that distinguish owned vs reference implementat
 
 The symbol naming inconsistency is specific to **verus-analyzer**, not rust-analyzer. rust-analyzer's newer format (`impl#[Type][Trait]method()`) is consistent and produces unique symbols for all trait implementations.
 
-**scip-atoms now repairs verus-analyzer's symbols** to be consistent with rust-analyzer's format by:
+**probe-verus now repairs verus-analyzer's symbols** to be consistent with rust-analyzer's format by:
 1. Extracting Self type from the `method().(self)` parameter symbol
 2. Inserting the Self type into symbols that are missing it
 3. Adding trait type parameters for disambiguation

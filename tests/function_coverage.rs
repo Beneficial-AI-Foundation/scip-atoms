@@ -5,7 +5,7 @@
 //!
 //! And verifies that each function appears in the generated atoms.json.
 
-use scip_atoms::{build_call_graph, convert_to_atoms_with_lines, parse_scip_json, AtomWithLines};
+use probe_verus::{build_call_graph, convert_to_atoms_with_lines, parse_scip_json, AtomWithLines};
 use std::collections::HashMap;
 
 const CSV_URL: &str =
