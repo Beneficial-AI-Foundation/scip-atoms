@@ -19,6 +19,7 @@ probe-verus <COMMAND>
 Commands:
   atomize         Generate call graph atoms with line numbers from SCIP indexes
   list-functions  List all functions in a Rust/Verus project
+  specify         Extract function specifications from atoms.json
   verify          Run Verus verification and analyze results
 ```
 
@@ -134,6 +135,76 @@ Options:
 probe-verus list-functions ./src
 probe-verus list-functions ./src --format detailed --show-visibility --show-kind
 probe-verus list-functions ./my-project --format json
+```
+
+---
+
+### `specify` - Extract Function Specifications
+
+Extract function specifications (requires/ensures clauses) from source files, keyed by probe-name from atoms.json.
+
+```bash
+probe-verus specify <PATH> --with-scip-names <ATOMS_FILE> [OPTIONS]
+
+Options:
+      --json-output <FILE>     Output file path (default: specs.json)
+      --with-scip-names <FILE> Path to atoms.json for scip-name lookup (required)
+      --with-spec-text         Include raw specification text in output
+```
+
+**Examples:**
+```bash
+# Extract specs using atoms.json for probe-name mapping
+probe-verus specify ./src --with-scip-names atoms.json
+
+# Include raw requires/ensures text
+probe-verus specify ./src --with-scip-names atoms.json --with-spec-text
+
+# Custom output file
+probe-verus specify ./src --with-scip-names atoms.json --json-output my-specs.json
+```
+
+**Output format:**
+
+```json
+{
+  "probe:crate/1.0.0/module/my_function()": {
+    "name": "my_function",
+    "file": "src/lib.rs",
+    "start_line": 42,
+    "end_line": 60,
+    "has_requires": true,
+    "has_ensures": true,
+    "has_trusted_assumption": false
+  }
+}
+```
+
+**Field descriptions:**
+- **Key**: The probe-name from atoms.json
+- **`name`**: Function name
+- **`file`**: Source file path
+- **`start_line`/`end_line`**: Function span
+- **`has_requires`**: Whether the function has a `requires` clause (precondition)
+- **`has_ensures`**: Whether the function has an `ensures` clause (postcondition)
+- **`has_trusted_assumption`**: Whether the function contains `assume()` or `admit()`
+
+**Extended output (`--with-spec-text`):**
+
+```json
+{
+  "probe:crate/1.0.0/module/my_function()": {
+    "name": "my_function",
+    "file": "src/lib.rs",
+    "start_line": 42,
+    "end_line": 60,
+    "has_requires": true,
+    "has_ensures": true,
+    "has_trusted_assumption": false,
+    "requires_text": "x > 0 && y > 0",
+    "ensures_text": "result == x + y"
+  }
+}
 ```
 
 ---
