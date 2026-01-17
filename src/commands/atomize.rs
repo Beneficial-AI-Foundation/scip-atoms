@@ -1,7 +1,7 @@
 //! Atomize command - Generate call graph atoms from SCIP indexes.
 
 use probe_verus::{
-    build_call_graph, convert_to_atoms_with_parsed_spans, find_duplicate_scip_names,
+    build_call_graph, convert_to_atoms_with_parsed_spans, find_duplicate_code_names,
     parse_scip_json, scip_cache::ScipCache, AtomWithLines,
 };
 use std::collections::HashMap;
@@ -62,17 +62,17 @@ pub fn cmd_atomize(
         println!("    (including dependencies-with-locations)");
     }
 
-    // Check for duplicate scip_names - these are a fatal error
+    // Check for duplicate code_names - these are a fatal error
     if let Err(msg) = check_duplicates(&atoms) {
         eprintln!();
         eprintln!("{}", msg);
         std::process::exit(1);
     }
 
-    // Convert atoms list to dictionary keyed by scip_name
+    // Convert atoms list to dictionary keyed by code_name
     let atoms_dict: HashMap<String, _> = atoms
         .into_iter()
-        .map(|atom| (atom.scip_name.clone(), atom))
+        .map(|atom| (atom.code_name.clone(), atom))
         .collect();
 
     // Write the output
@@ -132,19 +132,19 @@ fn get_scip_json(cache: &ScipCache, regenerate: bool) -> PathBuf {
     }
 }
 
-/// Check for duplicate scip_names and return an error message if found.
+/// Check for duplicate code_names and return an error message if found.
 fn check_duplicates(atoms: &[AtomWithLines]) -> Result<(), String> {
-    let duplicates = find_duplicate_scip_names(atoms);
+    let duplicates = find_duplicate_code_names(atoms);
     if duplicates.is_empty() {
         return Ok(());
     }
 
     let mut msg = format!(
-        "✗ ERROR: Found {} duplicate scip_name(s):\n",
+        "✗ ERROR: Found {} duplicate code_name(s):\n",
         duplicates.len()
     );
     for dup in &duplicates {
-        msg.push_str(&format!("    - '{}'\n", dup.scip_name));
+        msg.push_str(&format!("    - '{}'\n", dup.code_name));
         for occ in &dup.occurrences {
             msg.push_str(&format!(
                 "      at {}:{} ({})\n",
@@ -152,7 +152,7 @@ fn check_duplicates(atoms: &[AtomWithLines]) -> Result<(), String> {
             ));
         }
     }
-    msg.push_str("\n    Duplicate scip_names cannot be used as dictionary keys.\n");
+    msg.push_str("\n    Duplicate code_names cannot be used as dictionary keys.\n");
     msg.push_str("    This may indicate trait implementations that cannot be distinguished.\n");
     msg.push_str("    Consider filing an issue if this is unexpected.");
 
@@ -177,7 +177,7 @@ fn print_success_summary(output: &Path, atoms_dict: &HashMap<String, AtomWithLin
             .map(|a| a.dependencies.len())
             .sum::<usize>()
     );
-    println!("  - Output format: dictionary keyed by scip_name");
+    println!("  - Output format: dictionary keyed by code_name");
     println!();
 }
 
@@ -211,9 +211,9 @@ pub fn atomize_internal(
     );
 
     // Check for duplicates
-    let duplicates = find_duplicate_scip_names(&atoms);
+    let duplicates = find_duplicate_code_names(&atoms);
     if !duplicates.is_empty() {
-        return Err(format!("Found {} duplicate scip_name(s)", duplicates.len()));
+        return Err(format!("Found {} duplicate code_name(s)", duplicates.len()));
     }
 
     let count = atoms.len();
@@ -221,7 +221,7 @@ pub fn atomize_internal(
     // Convert to dictionary and write
     let atoms_dict: HashMap<String, _> = atoms
         .into_iter()
-        .map(|atom| (atom.scip_name.clone(), atom))
+        .map(|atom| (atom.code_name.clone(), atom))
         .collect();
 
     let json = serde_json::to_string_pretty(&atoms_dict)

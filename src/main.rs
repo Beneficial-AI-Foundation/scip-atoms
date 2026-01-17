@@ -110,10 +110,10 @@ enum Commands {
         #[arg(long)]
         no_cache: bool,
 
-        /// Enrich results with scip-names from atoms.json file
+        /// Enrich results with code-names from atoms.json file
         /// If no file specified, looks for atoms.json in current directory
         #[arg(long)]
-        with_scip_names: Option<Option<PathBuf>>,
+        with_code_names: Option<Option<PathBuf>>,
     },
 
     /// Extract function specifications (requires/ensures) to JSON
@@ -125,9 +125,9 @@ enum Commands {
         #[arg(long, default_value = DEFAULT_SPECS_OUTPUT)]
         json_output: PathBuf,
 
-        /// Path to atoms.json file for scip-name lookup (required for dictionary output)
+        /// Path to atoms.json file for code-name lookup (required for dictionary output)
         #[arg(long)]
-        with_scip_names: PathBuf,
+        with_code_names: PathBuf,
 
         /// Include raw specification text (requires/ensures clauses) in output
         #[arg(long)]
@@ -208,7 +208,7 @@ fn main() {
             verify_function,
             json_output,
             no_cache,
-            with_scip_names,
+            with_code_names,
         } => {
             cmd_verify(
                 project_path,
@@ -219,16 +219,16 @@ fn main() {
                 verify_function,
                 json_output,
                 no_cache,
-                with_scip_names,
+                with_code_names,
             );
         }
         Commands::Specify {
             path,
             json_output,
-            with_scip_names,
+            with_code_names,
             with_spec_text,
         } => {
-            cmd_specify(path, json_output, with_scip_names, with_spec_text);
+            cmd_specify(path, json_output, with_code_names, with_spec_text);
         }
         Commands::Run {
             project_path,

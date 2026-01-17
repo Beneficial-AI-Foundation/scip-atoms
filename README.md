@@ -85,12 +85,12 @@ When using `--with-locations`, an additional `dependencies-with-locations` field
     "dependencies": ["probe:crate/1.0.0/other/helper()"],
     "dependencies-with-locations": [
       {
-        "scip-name": "probe:crate/1.0.0/other/helper()",
+        "code-name": "probe:crate/1.0.0/other/helper()",
         "location": "precondition",
         "line": 45
       },
       {
-        "scip-name": "probe:crate/1.0.0/other/helper()",
+        "code-name": "probe:crate/1.0.0/other/helper()",
         "location": "inner",
         "line": 52
       }
@@ -144,24 +144,24 @@ probe-verus list-functions ./my-project --format json
 Extract function specifications (requires/ensures clauses) from source files, keyed by probe-name from atoms.json.
 
 ```bash
-probe-verus specify <PATH> --with-scip-names <ATOMS_FILE> [OPTIONS]
+probe-verus specify <PATH> --with-code-names <ATOMS_FILE> [OPTIONS]
 
 Options:
       --json-output <FILE>     Output file path (default: specs.json)
-      --with-scip-names <FILE> Path to atoms.json for scip-name lookup (required)
+      --with-code-names <FILE> Path to atoms.json for code-name lookup (required)
       --with-spec-text         Include raw specification text in output
 ```
 
 **Examples:**
 ```bash
 # Extract specs using atoms.json for probe-name mapping
-probe-verus specify ./src --with-scip-names atoms.json
+probe-verus specify ./src --with-code-names atoms.json
 
 # Include raw requires/ensures text
-probe-verus specify ./src --with-scip-names atoms.json --with-spec-text
+probe-verus specify ./src --with-code-names atoms.json --with-spec-text
 
 # Custom output file
-probe-verus specify ./src --with-scip-names atoms.json --json-output my-specs.json
+probe-verus specify ./src --with-code-names atoms.json --json-output my-specs.json
 ```
 
 **Output format:**
@@ -224,7 +224,7 @@ Options:
       --verify-function <FUNC>   Function to verify
       --json-output <FILE>       Write JSON results to file (default: results.json)
       --no-cache                 Don't cache the verification output
-      --with-scip-names [FILE]   Enrich results with scip-names from atoms.json
+      --with-code-names [FILE]   Enrich results with code-names from atoms.json
 ```
 
 **Caching Workflow:**
@@ -250,8 +250,8 @@ probe-verus verify
 probe-verus verify ./my-project --from-file verification_output.txt
 
 # Enrich results with probe-names from atoms.json
-probe-verus verify --with-scip-names
-probe-verus verify --with-scip-names path/to/atoms.json
+probe-verus verify --with-code-names
+probe-verus verify --with-code-names path/to/atoms.json
 ```
 
 **Function Categorization:**
@@ -275,7 +275,7 @@ Functions with `requires`/`ensures` are categorized as:
     "failed_functions": [
       {
         "display-name": "my_function",
-        "scip-name": "probe:crate/1.0.0/module/my_function()",
+        "code-name": "probe:crate/1.0.0/module/my_function()",
         "code-path": "src/lib.rs",
         "code-text": { "lines-start": 10, "lines-end": 20 }
       }
@@ -286,7 +286,7 @@ Functions with `requires`/`ensures` are categorized as:
 }
 ```
 
-Note: `scip-name` is only present when using `--with-scip-names` and uses the URI format `probe:<crate>/<version>/<path>`.
+Note: `code-name` is only present when using `--with-code-names` and uses the URI format `probe:<crate>/<version>/<path>`.
 
 ---
 

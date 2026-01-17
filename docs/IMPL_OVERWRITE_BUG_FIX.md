@@ -122,7 +122,7 @@ See `tests/duplicate_symbols.rs`:
 
 - `test_duplicate_mul_implementations` - Verifies multiple Mul impls are captured
 - `test_same_symbol_and_signature_different_self_types` - Specifically tests the X<a,b> case
-- `test_scip_names_include_type_info` - Verifies output includes type info for disambiguation
+- `test_code_names_include_type_info` - Verifies output includes type info for disambiguation
 - `test_neg_implementations_for_scalar` - Tests Neg trait impls (different symbol pattern)
 - `test_neg_implementations_for_ristretto` - Tests Neg trait impls for RistrettoPoint
 

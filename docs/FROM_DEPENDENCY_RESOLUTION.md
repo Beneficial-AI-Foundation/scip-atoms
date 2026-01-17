@@ -61,7 +61,7 @@ When resolving dependencies:
 
 2. **Match call-site hints to definitions**: If a call-site has `ProjectiveNielsPoint`, match it to the impl with `ProjectiveNielsPoint` in its context
 
-3. **Generate enriched scip_names**: Include the target type in the name
+3. **Generate enriched code_names**: Include the target type in the name
    - `NafLookupTable5<ProjectiveNielsPoint>#From<&EdwardsPoint>#from()`
 
 ## Results
@@ -71,7 +71,7 @@ When resolving dependencies:
 verus-analyzer produces identical symbols for different implementations:
 ```json
 {
-  "scip-name": "vartime_double_base/.../mul()",
+  "code-name": "vartime_double_base/.../mul()",
   "dependencies": [
     "window/NafLookupTable5#From#from()"
   ]
@@ -85,7 +85,7 @@ The dependency is ambiguous — it could refer to either the `ProjectiveNielsPoi
 probe-verus enriches the symbols with target type information:
 ```json
 {
-  "scip-name": "vartime_double_base/.../mul()",
+  "code-name": "vartime_double_base/.../mul()",
   "dependencies": [
     "window/NafLookupTable5<ProjectiveNielsPoint>#From<&EdwardsPoint>#from()"
   ]
@@ -104,7 +104,7 @@ The dependency now points to exactly the correct implementation.
 
 ## All From Implementations
 
-After disambiguation, each From implementation has a unique, descriptive scip_name:
+After disambiguation, each From implementation has a unique, descriptive code_name:
 
 ```
 Scalar#From<u8>#from()

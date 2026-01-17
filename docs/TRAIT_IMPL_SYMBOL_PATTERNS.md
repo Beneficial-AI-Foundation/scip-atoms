@@ -85,7 +85,7 @@ To handle Case 2, probe-verus uses the `signature_documentation.text` field to d
 
 1. **Detect duplicates**: When multiple symbols have the same string, use signature text as a secondary key
 2. **Create unique keys**: `symbol + "|" + signature_text`
-3. **Enhance output**: Include type info in scip_name for disambiguation
+3. **Enhance output**: Include type info in code_name for disambiguation
 
 ### Result
 
@@ -143,11 +143,11 @@ window/LookupTable#From<&EdwardsPoint>#from()@436
 
 See `tests/duplicate_symbols.rs` for tests that verify all patterns are handled correctly:
 - `test_duplicate_mul_implementations` - verifies Mul fix works
-- `test_scip_names_include_type_info` - verifies enhanced scip_names
+- `test_code_names_include_type_info` - verifies enhanced code_names
 - `test_neg_implementations_for_scalar` - verifies Neg works naturally
 - `test_neg_implementations_for_ristretto` - verifies Neg works naturally
 - `test_from_implementations_are_disambiguated` - verifies From trait handling
-- `test_no_duplicate_scip_names` - verifies no duplicates remain in output
+- `test_no_duplicate_code_names` - verifies no duplicates remain in output
 
 
 

@@ -123,9 +123,9 @@ fn build_atom_index(atoms: &[AtomWithLines]) -> HashMap<(String, String), Vec<&A
     let mut index: HashMap<(String, String), Vec<&AtomWithLines>> = HashMap::new();
 
     for atom in atoms {
-        // Extract module name from scip-name
+        // Extract module name from code-name
         // E.g., "curve25519-dalek 4.1.3 scalar/Scalar#hash_from_bytes()" -> "scalar"
-        if let Some(module) = extract_module_from_scip_name(&atom.scip_name) {
+        if let Some(module) = extract_module_from_code_name(&atom.code_name) {
             let key = (atom.display_name.clone(), module);
             index.entry(key).or_default().push(atom);
         }
@@ -134,12 +134,12 @@ fn build_atom_index(atoms: &[AtomWithLines]) -> HashMap<(String, String), Vec<&A
     index
 }
 
-/// Extract the module name from a scip-name.
+/// Extract the module name from a code-name.
 /// E.g., "curve25519-dalek 4.1.3 scalar/Scalar#hash_from_bytes()" -> "scalar"
 /// E.g., "curve25519-dalek 4.1.3 backend/serial/u64/field/FieldElement51#add()" -> "field"
-fn extract_module_from_scip_name(scip_name: &str) -> Option<String> {
+fn extract_module_from_code_name(code_name: &str) -> Option<String> {
     // Skip the crate and version prefix
-    let parts: Vec<&str> = scip_name.splitn(3, ' ').collect();
+    let parts: Vec<&str> = code_name.splitn(3, ' ').collect();
     if parts.len() < 3 {
         return None;
     }
@@ -185,7 +185,7 @@ fn find_matching_atom<'a>(
     // Try fuzzy match: just by display name and module substring
     atoms
         .iter()
-        .find(|atom| atom.display_name == method_name && atom.scip_name.contains(module_name))
+        .find(|atom| atom.display_name == method_name && atom.code_name.contains(module_name))
 }
 
 #[test]
@@ -263,7 +263,7 @@ fn test_specific_critical_functions() {
         let found = index.contains_key(&key)
             || atoms
                 .iter()
-                .any(|a| &a.display_name == method && a.scip_name.contains(module));
+                .any(|a| &a.display_name == method && a.code_name.contains(module));
 
         if found {
             found_critical.push((method, module));

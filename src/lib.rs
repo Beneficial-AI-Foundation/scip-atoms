@@ -148,8 +148,8 @@ pub enum CallLocation {
 /// A dependency with its call location
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DependencyWithLocation {
-    #[serde(rename = "scip-name")]
-    pub scip_name: String,
+    #[serde(rename = "code-name")]
+    pub code_name: String,
     pub location: CallLocation,
     pub line: usize,
 }
@@ -179,8 +179,8 @@ pub struct AtomWithLines {
     #[serde(rename = "display-name")]
     pub display_name: String,
     #[serde(skip_serializing)]
-    pub scip_name: String,
-    /// Set of dependency scip_names (for backward compatibility)
+    pub code_name: String,
+    /// Set of dependency code_names (for backward compatibility)
     pub dependencies: HashSet<String>,
     /// Dependencies with call location information (only included with --with-locations flag)
     #[serde(
@@ -811,24 +811,24 @@ fn extract_code_module(probe_name: &str) -> String {
 /// 1. Adding trait type parameters (e.g., `Mul` -> `Mul<Scalar>`) for disambiguation
 /// 2. Adding the Self type when missing (e.g., `montgomery/Mul#mul` -> `montgomery/MontgomeryPoint#Mul#mul`)
 /// 3. Adding line number suffix when type info alone can't disambiguate (e.g., generic impls)
-fn symbol_to_scip_name(
+fn symbol_to_code_name(
     symbol: &str,
     display_name: &str,
     signature: Option<&str>,
     self_type: Option<&str>,
 ) -> String {
-    symbol_to_scip_name_with_line(symbol, display_name, signature, self_type, None)
+    symbol_to_code_name_with_line(symbol, display_name, signature, self_type, None)
 }
 
 /// Convert symbol to scip name, with optional line number for disambiguation.
-fn symbol_to_scip_name_with_line(
+fn symbol_to_code_name_with_line(
     symbol: &str,
     display_name: &str,
     signature: Option<&str>,
     self_type: Option<&str>,
     line_number: Option<usize>,
 ) -> String {
-    symbol_to_scip_name_full(
+    symbol_to_code_name_full(
         symbol,
         display_name,
         signature,
@@ -860,7 +860,7 @@ fn symbol_to_scip_name_with_line(
 /// # Returns
 /// Returns `Ok(String)` with the formatted scip name, or `Err(ProbeError)` if the symbol
 /// format is invalid.
-fn symbol_to_scip_name_full(
+fn symbol_to_code_name_full(
     symbol: &str,
     display_name: &str,
     signature: Option<&str>,
@@ -998,8 +998,8 @@ pub fn convert_to_atoms_with_parsed_spans(
 
 /// Internal function that does the actual conversion.
 /// Uses a multi-pass approach:
-/// 1. Compute final scip_names for all atoms (with line numbers for duplicates)
-/// 2. Build a map: raw_symbol → list of final_scip_names
+/// 1. Compute final code_names for all atoms (with line numbers for duplicates)
+/// 2. Build a map: raw_symbol → list of final_code_names
 /// 3. Resolve dependencies using the map (include all matches for ambiguous refs)
 fn convert_to_atoms_with_lines_internal(
     call_graph: &HashMap<String, FunctionNode>,
@@ -1007,12 +1007,12 @@ fn convert_to_atoms_with_lines_internal(
     span_map: Option<&HashMap<(String, String, usize), verus_parser::SpanAndMode>>,
     with_locations: bool,
 ) -> Vec<AtomWithLines> {
-    // === Phase 1: Compute line ranges and base scip_names for all nodes ===
+    // === Phase 1: Compute line ranges and base code_names for all nodes ===
     struct NodeData<'a> {
         node: &'a FunctionNode,
         lines_start: usize,
         lines_end: usize,
-        base_scip_name: String,
+        base_code_name: String,
         mode: FunctionMode,
         /// Line range of requires clause, if present
         requires_range: Option<(usize, usize)>,
@@ -1069,8 +1069,8 @@ fn convert_to_atoms_with_lines_internal(
                 (None, None)
             };
 
-            // Generate base scip_name WITHOUT line number
-            let base_scip_name = symbol_to_scip_name(
+            // Generate base code_name WITHOUT line number
+            let base_code_name = symbol_to_code_name(
                 &node.symbol,
                 &node.display_name,
                 Some(&node.signature_text),
@@ -1081,7 +1081,7 @@ fn convert_to_atoms_with_lines_internal(
                 node,
                 lines_start,
                 lines_end,
-                base_scip_name,
+                base_code_name,
                 mode,
                 requires_range,
                 ensures_range,
@@ -1089,28 +1089,28 @@ fn convert_to_atoms_with_lines_internal(
         })
         .collect();
 
-    // === Phase 2: Detect duplicates and compute final scip_names ===
-    let mut scip_name_count: HashMap<String, usize> = HashMap::new();
+    // === Phase 2: Detect duplicates and compute final code_names ===
+    let mut code_name_count: HashMap<String, usize> = HashMap::new();
     for data in &node_data {
-        *scip_name_count
-            .entry(data.base_scip_name.clone())
+        *code_name_count
+            .entry(data.base_code_name.clone())
             .or_insert(0) += 1;
     }
 
     // For disambiguation, we need to find "discriminating" types that uniquely identify each impl
-    // Group nodes by their base_scip_name to find duplicates
-    let mut scip_name_to_nodes: HashMap<&str, Vec<usize>> = HashMap::new();
+    // Group nodes by their base_code_name to find duplicates
+    let mut code_name_to_nodes: HashMap<&str, Vec<usize>> = HashMap::new();
     for (idx, data) in node_data.iter().enumerate() {
-        scip_name_to_nodes
-            .entry(&data.base_scip_name)
+        code_name_to_nodes
+            .entry(&data.base_code_name)
             .or_default()
             .push(idx);
     }
 
     // For each group of duplicates, find which types are discriminating
-    // (appear in some but not all impls of the same base_scip_name)
+    // (appear in some but not all impls of the same base_code_name)
     let mut node_discriminating_type: HashMap<usize, Option<String>> = HashMap::new();
-    for indices in scip_name_to_nodes.values() {
+    for indices in code_name_to_nodes.values() {
         if indices.len() <= 1 {
             // Not a duplicate, no disambiguation needed
             for &idx in indices {
@@ -1144,13 +1144,13 @@ fn convert_to_atoms_with_lines_internal(
         }
     }
 
-    // Compute final scip_name for each node
-    let final_scip_names: Vec<String> = node_data
+    // Compute final code_name for each node
+    let final_code_names: Vec<String> = node_data
         .iter()
         .enumerate()
         .map(|(idx, data)| {
-            let is_duplicate = scip_name_count
-                .get(&data.base_scip_name)
+            let is_duplicate = code_name_count
+                .get(&data.base_code_name)
                 .copied()
                 .unwrap_or(0)
                 > 1;
@@ -1158,7 +1158,7 @@ fn convert_to_atoms_with_lines_internal(
             if is_duplicate {
                 // Try to use discriminating type first, fall back to line number
                 let result = if let Some(Some(target_type)) = node_discriminating_type.get(&idx) {
-                    symbol_to_scip_name_full(
+                    symbol_to_code_name_full(
                         &data.node.symbol,
                         &data.node.display_name,
                         Some(&data.node.signature_text),
@@ -1168,7 +1168,7 @@ fn convert_to_atoms_with_lines_internal(
                     )
                 } else if data.lines_start > 0 {
                     // Fall back to line number if no discriminating type found
-                    symbol_to_scip_name_full(
+                    symbol_to_code_name_full(
                         &data.node.symbol,
                         &data.node.display_name,
                         Some(&data.node.signature_text),
@@ -1177,37 +1177,37 @@ fn convert_to_atoms_with_lines_internal(
                         None,
                     )
                 } else {
-                    Ok(data.base_scip_name.clone())
+                    Ok(data.base_code_name.clone())
                 };
                 result.unwrap_or_else(|e| {
                     eprintln!("Warning: {}", e);
-                    data.base_scip_name.clone()
+                    data.base_code_name.clone()
                 })
             } else {
-                data.base_scip_name.clone()
+                data.base_code_name.clone()
             }
         })
         .collect();
 
-    // === Phase 3: Build map from raw symbol → list of (scip_name, type_context) ===
+    // === Phase 3: Build map from raw symbol → list of (code_name, type_context) ===
     // The type_context helps match call-site type hints to the correct implementation
-    struct ScipNameWithContext {
-        scip_name: String,
+    struct CodeNameWithContext {
+        code_name: String,
         /// Types from definition site (nearby type references) for disambiguation
         type_context: Vec<String>,
     }
 
-    let mut raw_symbol_to_scip_names: HashMap<String, Vec<ScipNameWithContext>> = HashMap::new();
-    for (data, final_name) in node_data.iter().zip(final_scip_names.iter()) {
+    let mut raw_symbol_to_code_names: HashMap<String, Vec<CodeNameWithContext>> = HashMap::new();
+    for (data, final_name) in node_data.iter().zip(final_code_names.iter()) {
         // Use definition_type_context from FunctionNode (captured during build_call_graph)
         // This contains types that appeared near the definition, like "ProjectiveNielsPoint"
         let type_context = data.node.definition_type_context.clone();
 
-        raw_symbol_to_scip_names
+        raw_symbol_to_code_names
             .entry(data.node.symbol.clone())
             .or_default()
-            .push(ScipNameWithContext {
-                scip_name: final_name.clone(),
+            .push(CodeNameWithContext {
+                code_name: final_name.clone(),
                 type_context,
             });
     }
@@ -1239,9 +1239,9 @@ fn convert_to_atoms_with_lines_internal(
     // === Phase 4: Build final atoms with resolved dependencies ===
     node_data
         .into_iter()
-        .zip(final_scip_names)
-        .map(|(data, scip_name)| {
-            // Resolve dependencies: map raw symbols to their full scip_names
+        .zip(final_code_names)
+        .map(|(data, code_name)| {
+            // Resolve dependencies: map raw symbols to their full code_names
             let mut dependencies = HashSet::new();
             let mut dependencies_with_locations: Vec<DependencyWithLocation> = Vec::new();
 
@@ -1259,15 +1259,15 @@ fn convert_to_atoms_with_lines_internal(
                     (None, 0)
                 };
 
-                // Check if this callee is a project function with known scip_names
-                if let Some(scip_name_contexts) = raw_symbol_to_scip_names.get(&callee.symbol) {
-                    if scip_name_contexts.len() == 1 {
+                // Check if this callee is a project function with known code_names
+                if let Some(code_name_contexts) = raw_symbol_to_code_names.get(&callee.symbol) {
+                    if code_name_contexts.len() == 1 {
                         // Only one implementation - use it directly
-                        let dep_scip_name = scip_name_contexts[0].scip_name.clone();
-                        dependencies.insert(dep_scip_name.clone());
+                        let dep_code_name = code_name_contexts[0].code_name.clone();
+                        dependencies.insert(dep_code_name.clone());
                         if let Some(loc) = location.clone() {
                             dependencies_with_locations.push(DependencyWithLocation {
-                                scip_name: dep_scip_name,
+                                code_name: dep_code_name,
                                 location: loc,
                                 line: call_line_1based,
                             });
@@ -1281,18 +1281,18 @@ fn convert_to_atoms_with_lines_internal(
                             .iter()
                             .filter(|hint| {
                                 // Count how many impls have this type in their context
-                                let matching_count = scip_name_contexts
+                                let matching_count = code_name_contexts
                                     .iter()
                                     .filter(|ctx| ctx.type_context.iter().any(|t| t == *hint))
                                     .count();
                                 // Keep hints that match some but not all impls
-                                matching_count > 0 && matching_count < scip_name_contexts.len()
+                                matching_count > 0 && matching_count < code_name_contexts.len()
                             })
                             .collect();
 
                         let matched: Vec<_> = if !discriminating_hints.is_empty() {
                             // Use discriminating hints to filter
-                            scip_name_contexts
+                            code_name_contexts
                                 .iter()
                                 .filter(|ctx| {
                                     discriminating_hints
@@ -1302,7 +1302,7 @@ fn convert_to_atoms_with_lines_internal(
                                 .collect()
                         } else {
                             // Fallback: use all hints
-                            scip_name_contexts
+                            code_name_contexts
                                 .iter()
                                 .filter(|ctx| {
                                     callee.type_hints.iter().any(|hint| {
@@ -1316,22 +1316,22 @@ fn convert_to_atoms_with_lines_internal(
 
                         if matched.len() == 1 {
                             // Found exactly one match - use it
-                            let dep_scip_name = matched[0].scip_name.clone();
-                            dependencies.insert(dep_scip_name.clone());
+                            let dep_code_name = matched[0].code_name.clone();
+                            dependencies.insert(dep_code_name.clone());
                             if let Some(loc) = location.clone() {
                                 dependencies_with_locations.push(DependencyWithLocation {
-                                    scip_name: dep_scip_name,
+                                    code_name: dep_code_name,
                                     location: loc,
                                     line: call_line_1based,
                                 });
                             }
                         } else {
                             // Still ambiguous - include all
-                            for ctx in scip_name_contexts {
-                                dependencies.insert(ctx.scip_name.clone());
+                            for ctx in code_name_contexts {
+                                dependencies.insert(ctx.code_name.clone());
                                 if let Some(loc) = location.clone() {
                                     dependencies_with_locations.push(DependencyWithLocation {
-                                        scip_name: ctx.scip_name.clone(),
+                                        code_name: ctx.code_name.clone(),
                                         location: loc,
                                         line: call_line_1based,
                                     });
@@ -1340,11 +1340,11 @@ fn convert_to_atoms_with_lines_internal(
                         }
                     } else {
                         // No type hints - include all possible implementations
-                        for ctx in scip_name_contexts {
-                            dependencies.insert(ctx.scip_name.clone());
+                        for ctx in code_name_contexts {
+                            dependencies.insert(ctx.code_name.clone());
                             if let Some(loc) = location.clone() {
                                 dependencies_with_locations.push(DependencyWithLocation {
-                                    scip_name: ctx.scip_name.clone(),
+                                    code_name: ctx.code_name.clone(),
                                     location: loc,
                                     line: call_line_1based,
                                 });
@@ -1357,11 +1357,11 @@ fn convert_to_atoms_with_lines_internal(
                         .get(&callee.symbol)
                         .cloned()
                         .unwrap_or_else(|| "unknown".to_string());
-                    let dep_path = symbol_to_scip_name(&callee.symbol, &display_name, None, None);
+                    let dep_path = symbol_to_code_name(&callee.symbol, &display_name, None, None);
                     dependencies.insert(dep_path.clone());
                     if let Some(loc) = location {
                         dependencies_with_locations.push(DependencyWithLocation {
-                            scip_name: dep_path,
+                            code_name: dep_path,
                             location: loc,
                             line: call_line_1based,
                         });
@@ -1369,10 +1369,10 @@ fn convert_to_atoms_with_lines_internal(
                 }
             }
 
-            let code_module = extract_code_module(&scip_name);
+            let code_module = extract_code_module(&code_name);
             AtomWithLines {
                 display_name: data.node.display_name.clone(),
-                scip_name,
+                code_name,
                 dependencies,
                 dependencies_with_locations,
                 code_module,
@@ -1387,10 +1387,10 @@ fn convert_to_atoms_with_lines_internal(
         .collect()
 }
 
-/// Information about a duplicate scip_name
+/// Information about a duplicate code_name
 #[derive(Debug, Clone)]
-pub struct DuplicateScipName {
-    pub scip_name: String,
+pub struct DuplicateCodeName {
+    pub code_name: String,
     pub occurrences: Vec<DuplicateOccurrence>,
 }
 
@@ -1401,26 +1401,26 @@ pub struct DuplicateOccurrence {
     pub lines_start: usize,
 }
 
-/// Check for duplicate scip_names in the atoms output.
-/// Returns a list of scip_names that appear more than once.
+/// Check for duplicate code_names in the atoms output.
+/// Returns a list of code_names that appear more than once.
 ///
 /// This is useful for detecting cases where the disambiguation logic fails,
 /// such as trait implementations that can't be distinguished by signature alone.
-pub fn find_duplicate_scip_names(atoms: &[AtomWithLines]) -> Vec<DuplicateScipName> {
-    let mut scip_name_to_atoms: HashMap<String, Vec<&AtomWithLines>> = HashMap::new();
+pub fn find_duplicate_code_names(atoms: &[AtomWithLines]) -> Vec<DuplicateCodeName> {
+    let mut code_name_to_atoms: HashMap<String, Vec<&AtomWithLines>> = HashMap::new();
 
     for atom in atoms {
-        scip_name_to_atoms
-            .entry(atom.scip_name.clone())
+        code_name_to_atoms
+            .entry(atom.code_name.clone())
             .or_default()
             .push(atom);
     }
 
-    scip_name_to_atoms
+    code_name_to_atoms
         .into_iter()
         .filter(|(_, atoms)| atoms.len() > 1)
-        .map(|(scip_name, atoms)| DuplicateScipName {
-            scip_name,
+        .map(|(code_name, atoms)| DuplicateCodeName {
+            code_name,
             occurrences: atoms
                 .into_iter()
                 .map(|a| DuplicateOccurrence {

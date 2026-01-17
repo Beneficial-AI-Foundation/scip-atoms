@@ -751,8 +751,8 @@ pub struct VerificationResult {
 pub struct FunctionLocation {
     #[serde(rename = "display-name")]
     pub display_name: String,
-    #[serde(rename = "scip-name", skip_serializing_if = "Option::is_none")]
-    pub scip_name: Option<String>,
+    #[serde(rename = "code-name", skip_serializing_if = "Option::is_none")]
+    pub code_name: Option<String>,
     #[serde(rename = "code-path")]
     pub code_path: String,
     #[serde(rename = "code-text")]
@@ -909,7 +909,7 @@ impl VerificationAnalyzer {
 
                     let location = FunctionLocation {
                         display_name: func.name.clone(),
-                        scip_name: None,
+                        code_name: None,
                         code_path: file_path,
                         code_text: CodeTextInfo {
                             lines_start: func.start_line,
@@ -991,8 +991,8 @@ impl VerificationAnalyzer {
     }
 }
 
-/// Atom entry from atoms.json for scip-name lookup
-/// Note: scip-name is now the dictionary key, not a field in the value
+/// Atom entry from atoms.json for code-name lookup
+/// Note: code-name is now the dictionary key, not a field in the value
 #[derive(Debug, Clone, Deserialize)]
 struct AtomEntry {
     #[serde(rename = "display-name")]
@@ -1004,14 +1004,14 @@ struct AtomEntry {
     code_text: CodeTextInfo,
 }
 
-/// Enrich an AnalysisResult with scip-names from an atoms.json file
+/// Enrich an AnalysisResult with code-names from an atoms.json file
 ///
-/// Matches functions by (code-path suffix, lines-start) to find the corresponding scip-name.
-pub fn enrich_with_scip_names(
+/// Matches functions by (code-path suffix, lines-start) to find the corresponding code-name.
+pub fn enrich_with_code_names(
     result: &mut AnalysisResult,
     atoms_path: &Path,
 ) -> Result<usize, String> {
-    // Read and parse atoms.json (now a dictionary keyed by scip-name)
+    // Read and parse atoms.json (now a dictionary keyed by code-name)
     let content = fs::read_to_string(atoms_path)
         .map_err(|e| format!("Failed to read {}: {}", atoms_path.display(), e))?;
 
@@ -1022,15 +1022,15 @@ pub fn enrich_with_scip_names(
     // different start lines due to attributes/doc comments handling
     // (LINE_TOLERANCE is imported from crate::constants)
 
-    // Helper to find scip-name with fuzzy path and line matching
-    let find_scip_name = |loc: &FunctionLocation| -> Option<String> {
+    // Helper to find code-name with fuzzy path and line matching
+    let find_code_name = |loc: &FunctionLocation| -> Option<String> {
         let loc_suffix = extract_src_suffix(&loc.code_path);
         let loc_line = loc.code_text.lines_start;
 
         let mut best_match: Option<&String> = None;
         let mut best_line_diff: usize = usize::MAX;
 
-        for (scip_name, atom) in &atoms {
+        for (code_name, atom) in &atoms {
             let atom_suffix = extract_src_suffix(&atom.code_path);
 
             // Check if paths match by suffix
@@ -1045,7 +1045,7 @@ pub fn enrich_with_scip_names(
                 if line_diff <= LINE_TOLERANCE && line_diff < best_line_diff {
                     // Also verify display names match to avoid false positives
                     if loc.display_name == atom.display_name {
-                        best_match = Some(scip_name);
+                        best_match = Some(code_name);
                         best_line_diff = line_diff;
 
                         // Exact line match is the best we can do
@@ -1064,22 +1064,22 @@ pub fn enrich_with_scip_names(
     let mut enriched_count = 0;
 
     for func in &mut result.verification.failed_functions {
-        if let Some(scip_name) = find_scip_name(func) {
-            func.scip_name = Some(scip_name);
+        if let Some(code_name) = find_code_name(func) {
+            func.code_name = Some(code_name);
             enriched_count += 1;
         }
     }
 
     for func in &mut result.verification.verified_functions {
-        if let Some(scip_name) = find_scip_name(func) {
-            func.scip_name = Some(scip_name);
+        if let Some(code_name) = find_code_name(func) {
+            func.code_name = Some(code_name);
             enriched_count += 1;
         }
     }
 
     for func in &mut result.verification.unverified_functions {
-        if let Some(scip_name) = find_scip_name(func) {
-            func.scip_name = Some(scip_name);
+        if let Some(code_name) = find_code_name(func) {
+            func.code_name = Some(code_name);
             enriched_count += 1;
         }
     }

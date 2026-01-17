@@ -37,9 +37,9 @@ pub enum ProbeError {
     #[error("Project validation error: {0}")]
     ProjectValidation(String),
 
-    /// Duplicate scip-names detected (fatal for atomize)
-    #[error("Found {count} duplicate scip-name(s): {names:?}")]
-    DuplicateScipNames { count: usize, names: Vec<String> },
+    /// Duplicate code-names detected (fatal for atomize)
+    #[error("Found {count} duplicate code-name(s): {names:?}")]
+    DuplicateCodeNames { count: usize, names: Vec<String> },
 
     /// External tool error
     #[error("External tool '{tool}' error: {message}")]

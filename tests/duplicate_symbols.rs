@@ -1,5 +1,5 @@
 use probe_verus::{
-    build_call_graph, convert_to_atoms_with_lines, find_duplicate_scip_names, parse_scip_json,
+    build_call_graph, convert_to_atoms_with_lines, find_duplicate_code_names, parse_scip_json,
 };
 
 fn get_test_data() -> (
@@ -67,7 +67,7 @@ fn test_duplicate_mul_implementations() {
 }
 
 #[test]
-fn test_scip_names_include_type_info() {
+fn test_code_names_include_type_info() {
     let scip_data = parse_scip_json("data/curve_top.json").expect("Failed to parse SCIP JSON");
     let (call_graph, symbol_to_display_name) = build_call_graph(&scip_data);
     let atoms = convert_to_atoms_with_lines(&call_graph, &symbol_to_display_name);
@@ -77,8 +77,8 @@ fn test_scip_names_include_type_info() {
     // Look for atoms that contain both the Mul trait and mul method
     let mul_atoms: Vec<_> = atoms
         .iter()
-        .filter(|a| a.scip_name.contains("Mul") && a.scip_name.contains("#mul"))
-        .filter(|a| a.scip_name.contains("montgomery/"))
+        .filter(|a| a.code_name.contains("Mul") && a.code_name.contains("#mul"))
+        .filter(|a| a.code_name.contains("montgomery/"))
         .collect();
 
     // Should have at least 2 distinct Mul implementations
@@ -86,38 +86,38 @@ fn test_scip_names_include_type_info() {
         mul_atoms.len() >= 2,
         "Expected at least 2 montgomery Mul atoms, found {}. Atoms: {:?}",
         mul_atoms.len(),
-        mul_atoms.iter().map(|a| &a.scip_name).collect::<Vec<_>>()
+        mul_atoms.iter().map(|a| &a.code_name).collect::<Vec<_>>()
     );
 
-    // The scip_names should include type parameters to distinguish them
+    // The code_names should include type parameters to distinguish them
     // Note: We preserve the & for reference types, so expect &Scalar not just Scalar
-    let scip_names: Vec<_> = mul_atoms.iter().map(|a| a.scip_name.as_str()).collect();
+    let code_names: Vec<_> = mul_atoms.iter().map(|a| a.code_name.as_str()).collect();
 
     // Check that type parameters are present for disambiguation
     // The & is now preserved for reference types
     assert!(
-        scip_names.iter().any(|s| s.contains("Mul<&Scalar>")),
-        "Expected scip_name with Mul<&Scalar>, got: {:?}",
-        scip_names
+        code_names.iter().any(|s| s.contains("Mul<&Scalar>")),
+        "Expected code_name with Mul<&Scalar>, got: {:?}",
+        code_names
     );
     assert!(
-        scip_names
+        code_names
             .iter()
             .any(|s| s.contains("Mul<&MontgomeryPoint>")),
-        "Expected scip_name with Mul<&MontgomeryPoint>, got: {:?}",
-        scip_names
+        "Expected code_name with Mul<&MontgomeryPoint>, got: {:?}",
+        code_names
     );
 
     // With the new self_type repair, symbols should also include the Self type
     // e.g., montgomery/&MontgomeryPoint#Mul<&Scalar>#mul()
     // Check that at least one has the Self type in the path
-    let has_self_type = scip_names
+    let has_self_type = code_names
         .iter()
         .any(|s| s.contains("MontgomeryPoint#Mul") || s.contains("Scalar#Mul"));
     assert!(
         has_self_type,
-        "Expected self_type in scip_name (e.g., MontgomeryPoint#Mul), got: {:?}",
-        scip_names
+        "Expected self_type in code_name (e.g., MontgomeryPoint#Mul), got: {:?}",
+        code_names
     );
 }
 
@@ -265,43 +265,43 @@ fn test_from_implementations_are_disambiguated() {
     // Find all From#from atoms for window module
     let from_atoms: Vec<_> = atoms
         .iter()
-        .filter(|a| a.scip_name.contains("From") && a.scip_name.contains("from"))
-        .filter(|a| a.scip_name.contains("window/"))
+        .filter(|a| a.code_name.contains("From") && a.code_name.contains("from"))
+        .filter(|a| a.code_name.contains("window/"))
         .collect();
 
     // Should have multiple From implementations
     if from_atoms.len() >= 2 {
-        // Check that scip_names are unique (no duplicates after disambiguation)
-        let scip_names: std::collections::HashSet<_> =
-            from_atoms.iter().map(|a| a.scip_name.as_str()).collect();
+        // Check that code_names are unique (no duplicates after disambiguation)
+        let code_names: std::collections::HashSet<_> =
+            from_atoms.iter().map(|a| a.code_name.as_str()).collect();
 
         // Each should be unique (no duplicates)
         assert_eq!(
-            scip_names.len(),
+            code_names.len(),
             from_atoms.len(),
-            "Some From implementations have duplicate scip_names! Found {} atoms but only {} unique scip_names: {:?}",
+            "Some From implementations have duplicate code_names! Found {} atoms but only {} unique code_names: {:?}",
             from_atoms.len(),
-            scip_names.len(),
-            scip_names
+            code_names.len(),
+            code_names
         );
     }
 }
 
-/// Test that there are no duplicate scip_names in the output.
+/// Test that there are no duplicate code_names in the output.
 /// This is a regression test for the issue where trait implementations
 /// with the same symbol but different types were not disambiguated.
 #[test]
-fn test_no_duplicate_scip_names() {
+fn test_no_duplicate_code_names() {
     let (call_graph, symbol_to_display_name) = get_test_data();
     let atoms = convert_to_atoms_with_lines(&call_graph, &symbol_to_display_name);
 
-    let duplicates = find_duplicate_scip_names(&atoms);
+    let duplicates = find_duplicate_code_names(&atoms);
 
     // Print duplicates for debugging if test fails
     if !duplicates.is_empty() {
-        eprintln!("Found {} duplicate scip_name(s):", duplicates.len());
+        eprintln!("Found {} duplicate code_name(s):", duplicates.len());
         for dup in &duplicates {
-            eprintln!("  - '{}'", dup.scip_name);
+            eprintln!("  - '{}'", dup.code_name);
             for occ in &dup.occurrences {
                 eprintln!(
                     "    at {}:{} ({})",
@@ -318,7 +318,7 @@ fn test_no_duplicate_scip_names() {
     //
     // assert!(
     //     duplicates.is_empty(),
-    //     "Found {} duplicate scip_names - see above for details",
+    //     "Found {} duplicate code_names - see above for details",
     //     duplicates.len()
     // );
 }

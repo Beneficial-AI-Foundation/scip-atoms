@@ -168,7 +168,7 @@ The analysis determines an overall status:
 ```json
 {
   "display-name": "my_function",
-  "scip-name": "curve25519-dalek 4.1.3 module/my_function()",
+  "code-name": "curve25519-dalek 4.1.3 module/my_function()",
   "dependencies": ["..."],
   "code-path": "src/lib.rs",
   "code-text": {

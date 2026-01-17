@@ -7,7 +7,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Atom entry from atoms.json for scip-name lookup.
+/// Atom entry from atoms.json for code-name lookup.
 #[derive(Deserialize)]
 struct AtomEntry {
     #[serde(rename = "display-name")]
@@ -27,7 +27,7 @@ struct CodeText {
 /// Execute the specify command.
 ///
 /// Extracts function specifications (requires/ensures) to JSON,
-/// keyed by scip-name from atoms.json.
+/// keyed by code-name from atoms.json.
 pub fn cmd_specify(path: PathBuf, output: PathBuf, atoms_path: PathBuf, with_spec_text: bool) {
     // Validate inputs
     if !path.exists() {
@@ -40,7 +40,7 @@ pub fn cmd_specify(path: PathBuf, output: PathBuf, atoms_path: PathBuf, with_spe
         std::process::exit(1);
     }
 
-    // Load atoms.json to get scip-name mappings
+    // Load atoms.json to get code-name mappings
     let atoms = load_atoms(&atoms_path);
 
     // Parse all functions with spec info (requires/ensures)
@@ -53,7 +53,7 @@ pub fn cmd_specify(path: PathBuf, output: PathBuf, atoms_path: PathBuf, with_spe
         with_spec_text, // include_spec_text
     );
 
-    // Match functions to scip-names and build output dictionary
+    // Match functions to code-names and build output dictionary
     let (output_map, matched_count, unmatched_count) = match_functions_to_atoms(parsed, &atoms);
 
     // Write JSON output
@@ -84,8 +84,8 @@ fn match_functions_to_atoms(
     let mut unmatched_count = 0;
 
     for func in parsed.functions {
-        if let Some(scip_name) = find_matching_atom(&func, atoms) {
-            output_map.insert(scip_name, func);
+        if let Some(code_name) = find_matching_atom(&func, atoms) {
+            output_map.insert(code_name, func);
             matched_count += 1;
         } else {
             unmatched_count += 1;
@@ -113,7 +113,7 @@ fn find_matching_atom(func: &FunctionInfo, atoms: &HashMap<String, AtomEntry>) -
     let mut best_match: Option<&str> = None;
     let mut best_line_diff = usize::MAX;
 
-    for (scip_name, atom) in atoms {
+    for (code_name, atom) in atoms {
         let atom_suffix = extract_src_suffix(&atom.code_path);
 
         let path_matches =
@@ -127,8 +127,7 @@ fn find_matching_atom(func: &FunctionInfo, atoms: &HashMap<String, AtomEntry>) -
             let within_span = atom_line >= func.start_line && atom_line <= func.end_line;
 
             // Also check traditional tolerance for cases without doc comments
-            let line_diff =
-                (func.start_line as isize - atom_line as isize).unsigned_abs();
+            let line_diff = (func.start_line as isize - atom_line as isize).unsigned_abs();
             let within_tolerance = line_diff <= LINE_TOLERANCE;
 
             if within_span || within_tolerance {
@@ -141,7 +140,7 @@ fn find_matching_atom(func: &FunctionInfo, atoms: &HashMap<String, AtomEntry>) -
                 };
 
                 if effective_diff < best_line_diff {
-                    best_match = Some(scip_name);
+                    best_match = Some(code_name);
                     best_line_diff = effective_diff;
 
                     // Exact match - can't do better

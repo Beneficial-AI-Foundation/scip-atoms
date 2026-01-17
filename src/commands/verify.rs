@@ -2,7 +2,7 @@
 
 use probe_verus::constants::{DATA_DIR, VERIFICATION_CONFIG_FILE, VERIFICATION_OUTPUT_FILE};
 use probe_verus::verification::{
-    enrich_with_scip_names, AnalysisResult, AnalysisStatus, VerificationAnalyzer, VerusRunner,
+    enrich_with_code_names, AnalysisResult, AnalysisStatus, VerificationAnalyzer, VerusRunner,
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -39,7 +39,7 @@ pub fn cmd_verify(
     verify_function: Option<String>,
     json_output: Option<PathBuf>,
     no_cache: bool,
-    with_scip_names: Option<Option<PathBuf>>,
+    with_code_names: Option<Option<PathBuf>>,
 ) {
     // Determine the project path and verification output source
     let (project_path, verification_output, exit_code) = get_verification_data(
@@ -60,9 +60,9 @@ pub fn cmd_verify(
         verify_function.as_deref(),
     );
 
-    // Enrich with scip-names if requested
-    if let Some(atoms_path_opt) = with_scip_names {
-        enrich_result_with_scip_names(&mut result, atoms_path_opt);
+    // Enrich with code-names if requested
+    if let Some(atoms_path_opt) = with_code_names {
+        enrich_result_with_code_names(&mut result, atoms_path_opt);
     }
 
     // Write JSON output
@@ -295,18 +295,18 @@ fn get_verification_data_from_cache() -> (PathBuf, String, i32) {
     (path, output, config.exit_code)
 }
 
-/// Enrich the analysis result with scip-names from atoms.json.
-fn enrich_result_with_scip_names(result: &mut AnalysisResult, atoms_path_opt: Option<PathBuf>) {
+/// Enrich the analysis result with code-names from atoms.json.
+fn enrich_result_with_code_names(result: &mut AnalysisResult, atoms_path_opt: Option<PathBuf>) {
     let atoms_path = atoms_path_opt.unwrap_or_else(|| PathBuf::from("atoms.json"));
 
     if atoms_path.exists() {
-        println!("Populating scip-names from {}...", atoms_path.display());
-        match enrich_with_scip_names(result, &atoms_path) {
+        println!("Populating code-names from {}...", atoms_path.display());
+        match enrich_with_code_names(result, &atoms_path) {
             Ok(count) => {
-                println!("  Enriched {} functions with scip-names", count);
+                println!("  Enriched {} functions with code-names", count);
             }
             Err(e) => {
-                eprintln!("Warning: Failed to enrich with scip-names: {}", e);
+                eprintln!("Warning: Failed to enrich with code-names: {}", e);
             }
         }
     } else {
@@ -359,11 +359,11 @@ pub fn verify_internal(
         None,
     );
 
-    // Enrich with scip-names if atoms.json exists
+    // Enrich with code-names if atoms.json exists
     if let Some(atoms) = atoms_path {
         if atoms.exists() {
-            if let Err(e) = enrich_with_scip_names(&mut result, atoms) {
-                eprintln!("    Warning: Failed to enrich with scip-names: {}", e);
+            if let Err(e) = enrich_with_code_names(&mut result, atoms) {
+                eprintln!("    Warning: Failed to enrich with code-names: {}", e);
             }
         }
     }

@@ -176,7 +176,7 @@ impl<'a> From<&'a EdwardsPoint> for LookupTable<ProjectiveNielsPoint> { ... }  /
 
 ### Duplicate Detection
 
-The tool now includes a `find_duplicate_scip_names()` function that can detect any
+The tool now includes a `find_duplicate_code_names()` function that can detect any
 remaining duplicates in the output. This is used in `main.rs` to print warnings when
 duplicates are detected, helping identify edge cases that may need additional handling.
 
