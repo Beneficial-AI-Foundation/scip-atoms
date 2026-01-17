@@ -811,6 +811,7 @@ impl VerificationAnalyzer {
             true,  // include_methods
             false, // show_visibility
             false, // show_kind
+            false, // include_spec_text
         );
 
         // Filter to only verifiable functions (those with requires or ensures)

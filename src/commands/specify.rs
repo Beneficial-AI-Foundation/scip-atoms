@@ -28,7 +28,7 @@ struct CodeText {
 ///
 /// Extracts function specifications (requires/ensures) to JSON,
 /// keyed by scip-name from atoms.json.
-pub fn cmd_specify(path: PathBuf, output: PathBuf, atoms_path: PathBuf) {
+pub fn cmd_specify(path: PathBuf, output: PathBuf, atoms_path: PathBuf, with_spec_text: bool) {
     // Validate inputs
     if !path.exists() {
         eprintln!("Error: Path does not exist: {}", path.display());
@@ -45,10 +45,12 @@ pub fn cmd_specify(path: PathBuf, output: PathBuf, atoms_path: PathBuf) {
 
     // Parse all functions with spec info (requires/ensures)
     let parsed: ParsedOutput = verus_parser::parse_all_functions(
-        &path, true,  // include_verus_constructs
-        true,  // include_methods
-        false, // show_visibility
-        false, // show_kind
+        &path,
+        true,           // include_verus_constructs
+        true,           // include_methods
+        false,          // show_visibility
+        false,          // show_kind
+        with_spec_text, // include_spec_text
     );
 
     // Match functions to scip-names and build output dictionary

@@ -128,6 +128,10 @@ enum Commands {
         /// Path to atoms.json file for scip-name lookup (required for dictionary output)
         #[arg(long)]
         with_scip_names: PathBuf,
+
+        /// Include raw specification text (requires/ensures clauses) in output
+        #[arg(long)]
+        with_spec_text: bool,
     },
 
     /// Run both atomize and verify commands (designed for Docker/CI usage)
@@ -222,8 +226,9 @@ fn main() {
             path,
             json_output,
             with_scip_names,
+            with_spec_text,
         } => {
-            cmd_specify(path, json_output, with_scip_names);
+            cmd_specify(path, json_output, with_scip_names, with_spec_text);
         }
         Commands::Run {
             project_path,

@@ -40,6 +40,7 @@ pub fn cmd_functions(
         include_methods,
         show_visibility,
         show_kind,
+        false, // include_spec_text - not needed for list-functions
     );
 
     // Determine actual output format

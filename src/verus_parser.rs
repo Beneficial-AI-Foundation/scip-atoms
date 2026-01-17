@@ -453,6 +453,12 @@ pub struct FunctionInfo {
     /// Whether the function body contains assume() or admit() (trusted assumptions)
     #[serde(default)]
     pub has_trusted_assumption: bool,
+    /// Raw text of the requires clause (precondition), if present and requested
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requires_text: Option<String>,
+    /// Raw text of the ensures clause (postcondition), if present and requested
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ensures_text: Option<String>,
 }
 
 /// Output format for function listing
@@ -478,6 +484,7 @@ struct FunctionInfoVisitor {
     include_methods: bool,
     show_visibility: bool,
     show_kind: bool,
+    include_spec_text: bool,
 }
 
 impl FunctionInfoVisitor {
@@ -488,6 +495,7 @@ impl FunctionInfoVisitor {
         include_methods: bool,
         show_visibility: bool,
         show_kind: bool,
+        include_spec_text: bool,
     ) -> Self {
         Self {
             functions: Vec::new(),
@@ -497,7 +505,36 @@ impl FunctionInfoVisitor {
             include_methods,
             show_visibility,
             show_kind,
+            include_spec_text,
         }
+    }
+
+    /// Extract raw text from source content given a span (line range).
+    /// Returns the text from start_line to end_line (inclusive, 1-indexed).
+    fn extract_text_from_span(&self, start_line: usize, end_line: usize) -> Option<String> {
+        let content = self.file_content.as_ref()?;
+        let lines: Vec<&str> = content.lines().collect();
+
+        // Convert to 0-indexed
+        let start_idx = start_line.saturating_sub(1);
+        let end_idx = end_line.min(lines.len());
+
+        if start_idx >= lines.len() || start_idx >= end_idx {
+            return None;
+        }
+
+        let text = lines[start_idx..end_idx].join("\n");
+        Some(text.trim().to_string())
+    }
+
+    /// Extract spec text (requires or ensures) from a signature spec clause.
+    fn extract_spec_text<T: Spanned>(&self, spec_clause: Option<&T>) -> Option<String> {
+        if !self.include_spec_text {
+            return None;
+        }
+        let clause = spec_clause?;
+        let span = clause.span();
+        self.extract_text_from_span(span.start().line, span.end().line)
     }
 
     /// Check if the function body (between start and end lines) contains assume() or admit()
@@ -600,6 +637,10 @@ impl FunctionInfoVisitor {
         let has_ensures = sig.spec.ensures.is_some();
         let has_trusted_assumption = self.has_trusted_assumption(start_line, end_line);
 
+        // Extract spec text if requested
+        let requires_text = self.extract_spec_text(sig.spec.requires.as_ref());
+        let ensures_text = self.extract_spec_text(sig.spec.ensures.as_ref());
+
         self.functions.push(FunctionInfo {
             name,
             file: self.file_path.clone(),
@@ -611,6 +652,8 @@ impl FunctionInfoVisitor {
             has_requires,
             has_ensures,
             has_trusted_assumption,
+            requires_text,
+            ensures_text,
         });
     }
 }
@@ -693,6 +736,7 @@ pub fn parse_file_for_functions(
     include_methods: bool,
     show_visibility: bool,
     show_kind: bool,
+    include_spec_text: bool,
 ) -> Result<Vec<FunctionInfo>, String> {
     let content = fs::read_to_string(file_path)
         .map_err(|e| format!("Failed to read file {}: {}", file_path.display(), e))?;
@@ -707,6 +751,7 @@ pub fn parse_file_for_functions(
         include_methods,
         show_visibility,
         show_kind,
+        include_spec_text,
     );
     visitor.visit_file(&syntax_tree);
 
@@ -730,6 +775,7 @@ pub fn parse_all_functions(
     include_methods: bool,
     show_visibility: bool,
     show_kind: bool,
+    include_spec_text: bool,
 ) -> ParsedOutput {
     let mut all_functions = Vec::new();
     let mut functions_by_file: HashMap<String, Vec<FunctionInfo>> = HashMap::new();
@@ -762,6 +808,7 @@ pub fn parse_all_functions(
             include_methods,
             show_visibility,
             show_kind,
+            include_spec_text,
         ) {
             Ok(mut functions) => {
                 let relative_path = make_relative(path);
@@ -790,6 +837,7 @@ pub fn parse_all_functions(
                 include_methods,
                 show_visibility,
                 show_kind,
+                include_spec_text,
             ) {
                 Ok(mut functions) => {
                     if !functions.is_empty() {
@@ -825,7 +873,7 @@ pub fn find_all_functions(
     path: &Path,
     include_verus_constructs: bool,
 ) -> HashMap<String, Vec<(String, usize)>> {
-    let output = parse_all_functions(path, include_verus_constructs, true, false, false);
+    let output = parse_all_functions(path, include_verus_constructs, true, false, false, false);
 
     output
         .functions_by_file
@@ -842,7 +890,7 @@ pub fn find_all_functions(
 
 /// Get a simple list of unique function names
 pub fn get_function_names(path: &Path, include_verus_constructs: bool) -> Vec<String> {
-    let output = parse_all_functions(path, include_verus_constructs, true, false, false);
+    let output = parse_all_functions(path, include_verus_constructs, true, false, false, false);
     let mut names: std::collections::HashSet<String> =
         output.functions.into_iter().map(|f| f.name).collect();
     let mut sorted: Vec<String> = names.drain().collect();
@@ -900,7 +948,8 @@ impl Foo {{
         )
         .unwrap();
 
-        let functions = parse_file_for_functions(file.path(), true, true, true, true).unwrap();
+        let functions =
+            parse_file_for_functions(file.path(), true, true, true, true, false).unwrap();
         assert_eq!(functions.len(), 3);
 
         // Check visibility is captured
