@@ -96,10 +96,19 @@ fn match_functions_to_atoms(
 }
 
 /// Find the best matching atom for a function.
+///
+/// Matching strategy:
+/// 1. Path must match (by suffix comparison)
+/// 2. Display name must match
+/// 3. SCIP line must fall within the function's span [start_line, end_line]
+///    OR be within LINE_TOLERANCE of start_line
+///
+/// This handles the case where verus_syn includes doc comments in the span
+/// (reporting an earlier start_line) while verus-analyzer reports the actual
+/// function declaration line.
 fn find_matching_atom(func: &FunctionInfo, atoms: &HashMap<String, AtomEntry>) -> Option<String> {
     let func_path = func.file.as_deref().unwrap_or("");
     let func_suffix = extract_src_suffix(func_path);
-    let func_line = func.start_line;
 
     let mut best_match: Option<&str> = None;
     let mut best_line_diff = usize::MAX;
@@ -111,16 +120,34 @@ fn find_matching_atom(func: &FunctionInfo, atoms: &HashMap<String, AtomEntry>) -
             paths_match_by_suffix(func_path, &atom.code_path) || func_suffix == atom_suffix;
 
         if path_matches && func.name == atom.display_name {
+            let atom_line = atom.code_text.lines_start;
+
+            // Check if SCIP line falls within the function span [start_line, end_line]
+            // This handles doc comments being included in verus_syn's span
+            let within_span = atom_line >= func.start_line && atom_line <= func.end_line;
+
+            // Also check traditional tolerance for cases without doc comments
             let line_diff =
-                (func_line as isize - atom.code_text.lines_start as isize).unsigned_abs();
+                (func.start_line as isize - atom_line as isize).unsigned_abs();
+            let within_tolerance = line_diff <= LINE_TOLERANCE;
 
-            if line_diff <= LINE_TOLERANCE && line_diff < best_line_diff {
-                best_match = Some(scip_name);
-                best_line_diff = line_diff;
+            if within_span || within_tolerance {
+                // Prefer matches closer to start_line
+                let effective_diff = if within_span && !within_tolerance {
+                    // SCIP line is within span but after tolerance - use distance from start
+                    atom_line - func.start_line
+                } else {
+                    line_diff
+                };
 
-                // Exact match - can't do better
-                if line_diff == 0 {
-                    break;
+                if effective_diff < best_line_diff {
+                    best_match = Some(scip_name);
+                    best_line_diff = effective_diff;
+
+                    // Exact match - can't do better
+                    if effective_diff == 0 {
+                        break;
+                    }
                 }
             }
         }
