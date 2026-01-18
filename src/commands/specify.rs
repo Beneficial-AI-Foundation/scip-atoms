@@ -124,17 +124,17 @@ fn find_matching_atom(func: &FunctionInfo, atoms: &HashMap<String, AtomEntry>) -
 
             // Check if SCIP line falls within the function span [start_line, end_line]
             // This handles doc comments being included in verus_syn's span
-            let within_span = atom_line >= func.start_line && atom_line <= func.end_line;
+            let within_span = atom_line >= func.spec_text.lines_start && atom_line <= func.spec_text.lines_end;
 
             // Also check traditional tolerance for cases without doc comments
-            let line_diff = (func.start_line as isize - atom_line as isize).unsigned_abs();
+            let line_diff = (func.spec_text.lines_start as isize - atom_line as isize).unsigned_abs();
             let within_tolerance = line_diff <= LINE_TOLERANCE;
 
             if within_span || within_tolerance {
                 // Prefer matches closer to start_line
                 let effective_diff = if within_span && !within_tolerance {
                     // SCIP line is within span but after tolerance - use distance from start
-                    atom_line - func.start_line
+                    atom_line - func.spec_text.lines_start
                 } else {
                     line_diff
                 };

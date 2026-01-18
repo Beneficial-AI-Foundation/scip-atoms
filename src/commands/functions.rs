@@ -79,7 +79,7 @@ pub fn cmd_functions(
                     print!(" ({})", vis);
                 }
                 if let Some(ref file) = func.file {
-                    print!(" @ {}:{}:{}", file, func.start_line, func.end_line);
+                    print!(" @ {}:{}:{}", file, func.spec_text.lines_start, func.spec_text.lines_end);
                 }
                 if let Some(ref context) = func.context {
                     print!(" in {}", context);

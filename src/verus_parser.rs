@@ -430,14 +430,24 @@ pub fn get_function_spec_ranges(
     (None, None)
 }
 
+/// Line range for spec text
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpecText {
+    #[serde(rename = "lines-start")]
+    pub lines_start: usize,
+    #[serde(rename = "lines-end")]
+    pub lines_end: usize,
+}
+
 /// Detailed function information for listing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionInfo {
+    #[serde(skip_serializing)]
     pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "code-path", skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
-    pub start_line: usize,
-    pub end_line: usize,
+    #[serde(rename = "spec-text")]
+    pub spec_text: SpecText,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -644,8 +654,10 @@ impl FunctionInfoVisitor {
         self.functions.push(FunctionInfo {
             name,
             file: self.file_path.clone(),
-            start_line,
-            end_line,
+            spec_text: SpecText {
+                lines_start: start_line,
+                lines_end: end_line,
+            },
             kind,
             visibility,
             context,
@@ -881,7 +893,7 @@ pub fn find_all_functions(
         .map(|(file_path, functions)| {
             let simplified: Vec<(String, usize)> = functions
                 .into_iter()
-                .map(|f| (f.name, f.start_line))
+                .map(|f| (f.name, f.spec_text.lines_start))
                 .collect();
             (file_path, simplified)
         })

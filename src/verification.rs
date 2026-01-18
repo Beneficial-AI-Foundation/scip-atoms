@@ -53,13 +53,13 @@ impl FunctionIndex {
             }
 
             let interval = Interval {
-                start: func.start_line,
-                stop: func.end_line + 1, // rust-lapper uses half-open intervals [start, stop)
+                start: func.spec_text.lines_start,
+                stop: func.spec_text.lines_end + 1, // rust-lapper uses half-open intervals [start, stop)
                 val: FunctionInterval {
                     name: func.name.clone(),
                     file: file_path.clone(),
-                    start_line: func.start_line,
-                    end_line: func.end_line,
+                    start_line: func.spec_text.lines_start,
+                    end_line: func.spec_text.lines_end,
                     has_trusted_assumption: func.has_trusted_assumption,
                 },
             };
@@ -905,15 +905,15 @@ impl VerificationAnalyzer {
 
                 for func in &verifiable_functions {
                     let file_path = func.file.clone().unwrap_or_default();
-                    let key = (func.name.clone(), file_path.clone(), func.start_line);
+                    let key = (func.name.clone(), file_path.clone(), func.spec_text.lines_start);
 
                     let location = FunctionLocation {
                         display_name: func.name.clone(),
                         code_name: None,
                         code_path: file_path,
                         code_text: CodeTextInfo {
-                            lines_start: func.start_line,
-                            lines_end: func.end_line,
+                            lines_start: func.spec_text.lines_start,
+                            lines_end: func.spec_text.lines_end,
                         },
                     };
 

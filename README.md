@@ -169,10 +169,11 @@ probe-verus specify ./src --with-code-names atoms.json --json-output my-specs.js
 ```json
 {
   "probe:crate/1.0.0/module/my_function()": {
-    "name": "my_function",
-    "file": "src/lib.rs",
-    "start_line": 42,
-    "end_line": 60,
+    "code-path": "src/lib.rs",
+    "spec-text": {
+      "lines-start": 42,
+      "lines-end": 60
+    },
     "has_requires": true,
     "has_ensures": true,
     "has_trusted_assumption": false
@@ -182,9 +183,8 @@ probe-verus specify ./src --with-code-names atoms.json --json-output my-specs.js
 
 **Field descriptions:**
 - **Key**: The probe-name from atoms.json
-- **`name`**: Function name
-- **`file`**: Source file path
-- **`start_line`/`end_line`**: Function span
+- **`code-path`**: Source file path
+- **`spec-text`**: Function span with `lines-start` and `lines-end`
 - **`has_requires`**: Whether the function has a `requires` clause (precondition)
 - **`has_ensures`**: Whether the function has an `ensures` clause (postcondition)
 - **`has_trusted_assumption`**: Whether the function contains `assume()` or `admit()`
@@ -194,10 +194,11 @@ probe-verus specify ./src --with-code-names atoms.json --json-output my-specs.js
 ```json
 {
   "probe:crate/1.0.0/module/my_function()": {
-    "name": "my_function",
-    "file": "src/lib.rs",
-    "start_line": 42,
-    "end_line": 60,
+    "code-path": "src/lib.rs",
+    "spec-text": {
+      "lines-start": 42,
+      "lines-end": 60
+    },
     "has_requires": true,
     "has_ensures": true,
     "has_trusted_assumption": false,
