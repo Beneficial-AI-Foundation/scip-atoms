@@ -761,6 +761,30 @@ pub struct FunctionLocation {
 
 // CodeTextInfo is imported from crate root for consistency with atoms.json format
 
+/// Verification status for the new proofs.json output format
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum VerificationStatus {
+    Success,
+    Failure,
+    Sorries,
+    Warning,
+}
+
+/// Function verification entry for the new proofs.json output format
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionVerificationEntry {
+    #[serde(rename = "code-path")]
+    pub code_path: String,
+    #[serde(rename = "code-line")]
+    pub code_line: usize,
+    pub verified: bool,
+    pub status: VerificationStatus,
+}
+
+/// New output format for proofs.json - a dictionary keyed by code-name
+pub type ProofsOutput = HashMap<String, FunctionVerificationEntry>;
+
 /// Verification output analyzer
 ///
 /// Analyzes Verus verification output to categorize functions as:
@@ -1085,6 +1109,109 @@ pub fn enrich_with_code_names(
     }
 
     Ok(enriched_count)
+}
+
+/// Convert an AnalysisResult to the new ProofsOutput format (dictionary keyed by code-name)
+///
+/// Matches functions by (code-path suffix, lines-start) to find the corresponding code-name.
+/// Returns a HashMap where keys are code-names and values are FunctionVerificationEntry.
+pub fn convert_to_proofs_output(
+    result: &AnalysisResult,
+    atoms_path: &Path,
+) -> Result<ProofsOutput, String> {
+    // Read and parse atoms.json (now a dictionary keyed by code-name)
+    let content = fs::read_to_string(atoms_path)
+        .map_err(|e| format!("Failed to read {}: {}", atoms_path.display(), e))?;
+
+    let atoms: HashMap<String, AtomEntry> = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse {}: {}", atoms_path.display(), e))?;
+
+    // Helper to find code-name with fuzzy path and line matching
+    let find_code_name = |loc: &FunctionLocation| -> Option<String> {
+        let loc_suffix = extract_src_suffix(&loc.code_path);
+        let loc_line = loc.code_text.lines_start;
+
+        let mut best_match: Option<&String> = None;
+        let mut best_line_diff: usize = usize::MAX;
+
+        for (code_name, atom) in &atoms {
+            let atom_suffix = extract_src_suffix(&atom.code_path);
+
+            // Check if paths match by suffix
+            let path_matches =
+                paths_match_by_suffix(&loc.code_path, &atom.code_path) || loc_suffix == atom_suffix;
+
+            if path_matches {
+                // Check line tolerance
+                let line_diff =
+                    (loc_line as isize - atom.code_text.lines_start as isize).unsigned_abs();
+
+                if line_diff <= LINE_TOLERANCE && line_diff < best_line_diff {
+                    // Also verify display names match to avoid false positives
+                    if loc.display_name == atom.display_name {
+                        best_match = Some(code_name);
+                        best_line_diff = line_diff;
+
+                        // Exact line match is the best we can do
+                        if line_diff == 0 {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        best_match.cloned()
+    };
+
+    let mut output = ProofsOutput::new();
+
+    // Add verified functions (status: success, verified: true)
+    for func in &result.verification.verified_functions {
+        if let Some(code_name) = find_code_name(func) {
+            output.insert(
+                code_name,
+                FunctionVerificationEntry {
+                    code_path: func.code_path.clone(),
+                    code_line: func.code_text.lines_start,
+                    verified: true,
+                    status: VerificationStatus::Success,
+                },
+            );
+        }
+    }
+
+    // Add failed functions (status: failure, verified: false)
+    for func in &result.verification.failed_functions {
+        if let Some(code_name) = find_code_name(func) {
+            output.insert(
+                code_name,
+                FunctionVerificationEntry {
+                    code_path: func.code_path.clone(),
+                    code_line: func.code_text.lines_start,
+                    verified: false,
+                    status: VerificationStatus::Failure,
+                },
+            );
+        }
+    }
+
+    // Add unverified functions with assume/admit (status: sorries, verified: false)
+    for func in &result.verification.unverified_functions {
+        if let Some(code_name) = find_code_name(func) {
+            output.insert(
+                code_name,
+                FunctionVerificationEntry {
+                    code_path: func.code_path.clone(),
+                    code_line: func.code_text.lines_start,
+                    verified: false,
+                    status: VerificationStatus::Sorries,
+                },
+            );
+        }
+    }
+
+    Ok(output)
 }
 
 #[cfg(test)]

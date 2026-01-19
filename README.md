@@ -258,39 +258,39 @@ probe-verus verify -a
 probe-verus verify -a path/to/atoms.json
 ```
 
-**Function Categorization:**
+**Output format (with `-a/--with-atoms`):**
 
-Functions with `requires`/`ensures` are categorized as:
-- **verified**: Passed verification, no `assume()`/`admit()`
-- **failed**: Had verification errors
-- **unverified**: Contains `assume()` or `admit()`
+When using `--with-atoms`, the output is a dictionary keyed by code-name:
 
-**Output format:**
 ```json
 {
-  "status": "verification_failed",
-  "summary": {
-    "total_functions": 262,
-    "failed_functions": 2,
-    "verified_functions": 171,
-    "unverified_functions": 89
+  "probe:crate/1.0.0/module/my_function()": {
+    "code-path": "src/lib.rs",
+    "code-line": 456,
+    "verified": true,
+    "status": "success"
   },
-  "verification": {
-    "failed_functions": [
-      {
-        "display-name": "my_function",
-        "code-name": "probe:crate/1.0.0/module/my_function()",
-        "code-path": "src/lib.rs",
-        "code-text": { "lines-start": 10, "lines-end": 20 }
-      }
-    ],
-    "verified_functions": [...],
-    "unverified_functions": [...]
+  "probe:crate/1.0.0/module/other_function()": {
+    "code-path": "src/lib.rs",
+    "code-line": 123,
+    "verified": false,
+    "status": "failure"
   }
 }
 ```
 
-Note: `code-name` is only present when using `--with-atoms` and uses the URI format `probe:<crate>/<version>/<path>`.
+**Field descriptions:**
+- **Key**: The code-name (probe URI) from atoms.json
+- **`code-path`**: Source file path
+- **`code-line`**: Starting line number of the function
+- **`verified`**: `true` if status is "success" or "warning", `false` otherwise
+- **`status`**: One of:
+  - `success`: Passed verification, no `assume()`/`admit()`
+  - `failure`: Had verification errors
+  - `sorries`: Contains `assume()` or `admit()`
+  - `warning`: Passed with warnings
+
+**Note:** The `-a/--with-atoms` flag is required to generate this format. Without it, the legacy format is used for backwards compatibility.
 
 ---
 

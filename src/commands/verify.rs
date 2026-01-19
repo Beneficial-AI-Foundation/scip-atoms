@@ -2,7 +2,8 @@
 
 use probe_verus::constants::{DATA_DIR, VERIFICATION_CONFIG_FILE, VERIFICATION_OUTPUT_FILE};
 use probe_verus::verification::{
-    enrich_with_code_names, AnalysisResult, AnalysisStatus, VerificationAnalyzer, VerusRunner,
+    convert_to_proofs_output, enrich_with_code_names, AnalysisResult, AnalysisStatus,
+    VerificationAnalyzer, VerusRunner,
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -52,7 +53,7 @@ pub fn cmd_verify(
 
     // Analyze the output
     let analyzer = VerificationAnalyzer::new();
-    let mut result = analyzer.analyze_output(
+    let result = analyzer.analyze_output(
         &project_path,
         &verification_output,
         Some(exit_code),
@@ -60,15 +61,34 @@ pub fn cmd_verify(
         verify_function.as_deref(),
     );
 
-    // Enrich with code-names if requested
-    if let Some(atoms_path_opt) = with_atoms {
-        enrich_result_with_code_names(&mut result, atoms_path_opt);
-    }
-
-    // Write JSON output
+    // Write JSON output - use new format when --with-atoms is provided
     let output_path = output.unwrap_or_else(|| PathBuf::from("proofs.json"));
-    let json = serde_json::to_string_pretty(&result).expect("Failed to serialize JSON");
-    std::fs::write(&output_path, &json).expect("Failed to write JSON output");
+
+    if let Some(atoms_path_opt) = with_atoms {
+        // New format: dictionary keyed by code-name
+        let atoms_path = get_atoms_path(atoms_path_opt);
+        match convert_to_proofs_output(&result, &atoms_path) {
+            Ok(proofs_output) => {
+                let json =
+                    serde_json::to_string_pretty(&proofs_output).expect("Failed to serialize JSON");
+                std::fs::write(&output_path, &json).expect("Failed to write JSON output");
+                println!(
+                    "Wrote {} functions to {}",
+                    proofs_output.len(),
+                    output_path.display()
+                );
+            }
+            Err(e) => {
+                eprintln!("Error converting to proofs output: {}", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        // Old format: full analysis result (for backwards compatibility)
+        let json = serde_json::to_string_pretty(&result).expect("Failed to serialize JSON");
+        std::fs::write(&output_path, &json).expect("Failed to write JSON output");
+        println!("JSON output written to {}", output_path.display());
+    }
 
     // Print summary
     print_summary(&result);
@@ -99,13 +119,15 @@ pub fn cmd_verify(
         }
     }
 
-    println!();
-    println!("JSON output written to {}", output_path.display());
-
     // Exit with appropriate code
     if result.status != AnalysisStatus::Success {
         std::process::exit(1);
     }
+}
+
+/// Get the atoms.json path, defaulting to "atoms.json" in current directory
+fn get_atoms_path(atoms_path_opt: Option<PathBuf>) -> PathBuf {
+    atoms_path_opt.unwrap_or_else(|| PathBuf::from("atoms.json"))
 }
 
 /// Get verification data from either running verification or using cached data.
@@ -293,25 +315,6 @@ fn get_verification_data_from_cache() -> (PathBuf, String, i32) {
     println!();
 
     (path, output, config.exit_code)
-}
-
-/// Enrich the analysis result with code-names from atoms.json.
-fn enrich_result_with_code_names(result: &mut AnalysisResult, atoms_path_opt: Option<PathBuf>) {
-    let atoms_path = atoms_path_opt.unwrap_or_else(|| PathBuf::from("atoms.json"));
-
-    if atoms_path.exists() {
-        println!("Populating code-names from {}...", atoms_path.display());
-        match enrich_with_code_names(result, &atoms_path) {
-            Ok(count) => {
-                println!("  Enriched {} functions with code-names", count);
-            }
-            Err(e) => {
-                eprintln!("Warning: Failed to enrich with code-names: {}", e);
-            }
-        }
-    } else {
-        eprintln!("Warning: atoms.json not found at {}", atoms_path.display());
-    }
 }
 
 /// Print the verification summary.
