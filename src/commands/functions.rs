@@ -24,7 +24,7 @@ pub fn cmd_functions(
     exclude_methods: bool,
     show_visibility: bool,
     show_kind: bool,
-    json_output: Option<PathBuf>,
+    output: Option<PathBuf>,
 ) {
     if !path.exists() {
         eprintln!("Error: Path does not exist: {}", path.display());
@@ -34,7 +34,7 @@ pub fn cmd_functions(
     let include_verus_constructs = !exclude_verus_constructs;
     let include_methods = !exclude_methods;
 
-    let output: ParsedOutput = verus_parser::parse_all_functions(
+    let parsed_output: ParsedOutput = verus_parser::parse_all_functions(
         &path,
         include_verus_constructs,
         include_methods,
@@ -44,7 +44,7 @@ pub fn cmd_functions(
     );
 
     // Determine actual output format
-    let actual_format = if json_output.is_some() {
+    let actual_format = if output.is_some() {
         OutputFormat::Json
     } else {
         format
@@ -52,8 +52,8 @@ pub fn cmd_functions(
 
     match actual_format {
         OutputFormat::Json => {
-            let json = serde_json::to_string_pretty(&output).unwrap();
-            if let Some(output_path) = json_output {
+            let json = serde_json::to_string_pretty(&parsed_output).unwrap();
+            if let Some(output_path) = output {
                 std::fs::write(&output_path, &json).expect("Failed to write JSON output");
                 println!("JSON output written to {}", output_path.display());
             } else {
@@ -62,7 +62,7 @@ pub fn cmd_functions(
         }
         OutputFormat::Text => {
             // Just print function names, one per line
-            let mut names: Vec<_> = output.functions.iter().map(|f| f.name.as_str()).collect();
+            let mut names: Vec<_> = parsed_output.functions.iter().map(|f| f.name.as_str()).collect();
             names.sort();
             names.dedup();
             for name in names {
@@ -70,7 +70,7 @@ pub fn cmd_functions(
             }
         }
         OutputFormat::Detailed => {
-            for func in &output.functions {
+            for func in &parsed_output.functions {
                 print!("{}", func.name);
                 if let Some(ref kind) = func.kind {
                     print!(" [{}]", kind);
@@ -88,7 +88,7 @@ pub fn cmd_functions(
             }
             println!(
                 "\nSummary: {} functions in {} files",
-                output.summary.total_functions, output.summary.total_files
+                parsed_output.summary.total_functions, parsed_output.summary.total_files
             );
         }
     }

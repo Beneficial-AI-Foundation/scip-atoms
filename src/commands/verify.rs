@@ -37,9 +37,9 @@ pub fn cmd_verify(
     package: Option<String>,
     verify_only_module: Option<String>,
     verify_function: Option<String>,
-    json_output: Option<PathBuf>,
+    output: Option<PathBuf>,
     no_cache: bool,
-    with_code_names: Option<Option<PathBuf>>,
+    with_atoms: Option<Option<PathBuf>>,
 ) {
     // Determine the project path and verification output source
     let (project_path, verification_output, exit_code) = get_verification_data(
@@ -61,12 +61,12 @@ pub fn cmd_verify(
     );
 
     // Enrich with code-names if requested
-    if let Some(atoms_path_opt) = with_code_names {
+    if let Some(atoms_path_opt) = with_atoms {
         enrich_result_with_code_names(&mut result, atoms_path_opt);
     }
 
     // Write JSON output
-    let output_path = json_output.unwrap_or_else(|| PathBuf::from("results.json"));
+    let output_path = output.unwrap_or_else(|| PathBuf::from("proofs.json"));
     let json = serde_json::to_string_pretty(&result).expect("Failed to serialize JSON");
     std::fs::write(&output_path, &json).expect("Failed to write JSON output");
 

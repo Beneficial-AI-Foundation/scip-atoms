@@ -91,7 +91,7 @@ pub const SCIP_INDEX_JSON_FILE: &str = "index.scip.json";
 pub const DEFAULT_ATOMS_OUTPUT: &str = "atoms.json";
 
 /// Default output filename for verify command
-pub const DEFAULT_RESULTS_OUTPUT: &str = "results.json";
+pub const DEFAULT_RESULTS_OUTPUT: &str = "proofs.json";
 
 /// Default output filename for specify command
 pub const DEFAULT_SPECS_OUTPUT: &str = "specs.json";

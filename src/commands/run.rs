@@ -85,7 +85,7 @@ pub fn cmd_run(
     }
 
     let atoms_path = output_dir.join("atoms.json");
-    let results_path = output_dir.join("results.json");
+    let results_path = output_dir.join("proofs.json");
 
     print_header(&project_path, &output_dir, &package);
 

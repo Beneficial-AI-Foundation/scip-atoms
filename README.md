@@ -127,7 +127,7 @@ Options:
       --exclude-methods          Exclude trait and impl methods
       --show-visibility          Show pub/private
       --show-kind                Show fn/spec fn/proof fn/etc.
-      --json-output <FILE>       Write JSON to file
+  -o, --output <FILE>            Write JSON to file
 ```
 
 **Examples:**
@@ -144,24 +144,24 @@ probe-verus list-functions ./my-project --format json
 Extract function specifications (requires/ensures clauses) from source files, keyed by probe-name from atoms.json.
 
 ```bash
-probe-verus specify <PATH> --with-code-names <ATOMS_FILE> [OPTIONS]
+probe-verus specify <PATH> -a <ATOMS_FILE> [OPTIONS]
 
 Options:
-      --json-output <FILE>     Output file path (default: specs.json)
-      --with-code-names <FILE> Path to atoms.json for code-name lookup (required)
-      --with-spec-text         Include raw specification text in output
+  -o, --output <FILE>        Output file path (default: specs.json)
+  -a, --with-atoms <FILE>    Path to atoms.json for code-name lookup (required)
+      --with-spec-text       Include raw specification text in output
 ```
 
 **Examples:**
 ```bash
 # Extract specs using atoms.json for probe-name mapping
-probe-verus specify ./src --with-code-names atoms.json
+probe-verus specify ./src -a atoms.json
 
 # Include raw requires/ensures text
-probe-verus specify ./src --with-code-names atoms.json --with-spec-text
+probe-verus specify ./src -a atoms.json --with-spec-text
 
 # Custom output file
-probe-verus specify ./src --with-code-names atoms.json --json-output my-specs.json
+probe-verus specify ./src -a atoms.json -o my-specs.json
 ```
 
 **Output format:**
@@ -223,9 +223,9 @@ Options:
   -p, --package <NAME>           Package to verify (for workspaces)
       --verify-only-module <MOD> Module to verify
       --verify-function <FUNC>   Function to verify
-      --json-output <FILE>       Write JSON results to file (default: results.json)
+  -o, --output <FILE>            Write JSON results to file (default: proofs.json)
       --no-cache                 Don't cache the verification output
-      --with-code-names [FILE]   Enrich results with code-names from atoms.json
+  -a, --with-atoms [FILE]        Enrich results with code-names from atoms.json
 ```
 
 **Caching Workflow:**
@@ -251,8 +251,8 @@ probe-verus verify
 probe-verus verify ./my-project --from-file verification_output.txt
 
 # Enrich results with probe-names from atoms.json
-probe-verus verify --with-code-names
-probe-verus verify --with-code-names path/to/atoms.json
+probe-verus verify -a
+probe-verus verify -a path/to/atoms.json
 ```
 
 **Function Categorization:**
@@ -287,7 +287,7 @@ Functions with `requires`/`ensures` are categorized as:
 }
 ```
 
-Note: `code-name` is only present when using `--with-code-names` and uses the URI format `probe:<crate>/<version>/<path>`.
+Note: `code-name` is only present when using `--with-atoms` and uses the URI format `probe:<crate>/<version>/<path>`.
 
 ---
 

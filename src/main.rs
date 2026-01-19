@@ -70,8 +70,8 @@ enum Commands {
         show_kind: bool,
 
         /// Output JSON to specified file
-        #[arg(long)]
-        json_output: Option<PathBuf>,
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
 
     /// Run Verus verification and analyze results, or analyze existing output
@@ -102,9 +102,9 @@ enum Commands {
         #[arg(long)]
         verify_function: Option<String>,
 
-        /// Output JSON results to specified file (default: results.json)
-        #[arg(long)]
-        json_output: Option<PathBuf>,
+        /// Output JSON results to specified file (default: proofs.json)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
 
         /// Don't cache the verification output
         #[arg(long)]
@@ -112,8 +112,8 @@ enum Commands {
 
         /// Enrich results with code-names from atoms.json file
         /// If no file specified, looks for atoms.json in current directory
-        #[arg(long)]
-        with_code_names: Option<Option<PathBuf>>,
+        #[arg(short = 'a', long)]
+        with_atoms: Option<Option<PathBuf>>,
     },
 
     /// Extract function specifications (requires/ensures) to JSON
@@ -122,12 +122,12 @@ enum Commands {
         path: PathBuf,
 
         /// Output file path (default: specs.json)
-        #[arg(long, default_value = DEFAULT_SPECS_OUTPUT)]
-        json_output: PathBuf,
+        #[arg(short, long, default_value = DEFAULT_SPECS_OUTPUT)]
+        output: PathBuf,
 
         /// Path to atoms.json file for code-name lookup (required for dictionary output)
-        #[arg(long)]
-        with_code_names: PathBuf,
+        #[arg(short = 'a', long)]
+        with_atoms: PathBuf,
 
         /// Include raw specification text (requires/ensures clauses) in output
         #[arg(long)]
@@ -187,7 +187,7 @@ fn main() {
             exclude_methods,
             show_visibility,
             show_kind,
-            json_output,
+            output,
         } => {
             cmd_functions(
                 path,
@@ -196,7 +196,7 @@ fn main() {
                 exclude_methods,
                 show_visibility,
                 show_kind,
-                json_output,
+                output,
             );
         }
         Commands::Verify {
@@ -206,9 +206,9 @@ fn main() {
             package,
             verify_only_module,
             verify_function,
-            json_output,
+            output,
             no_cache,
-            with_code_names,
+            with_atoms,
         } => {
             cmd_verify(
                 project_path,
@@ -217,18 +217,18 @@ fn main() {
                 package,
                 verify_only_module,
                 verify_function,
-                json_output,
+                output,
                 no_cache,
-                with_code_names,
+                with_atoms,
             );
         }
         Commands::Specify {
             path,
-            json_output,
-            with_code_names,
+            output,
+            with_atoms,
             with_spec_text,
         } => {
-            cmd_specify(path, json_output, with_code_names, with_spec_text);
+            cmd_specify(path, output, with_atoms, with_spec_text);
         }
         Commands::Run {
             project_path,
