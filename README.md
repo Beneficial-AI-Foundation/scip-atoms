@@ -174,6 +174,7 @@ probe-verus specify ./src -a atoms.json -o my-specs.json
       "lines-start": 42,
       "lines-end": 60
     },
+    "specified": true,
     "has_requires": true,
     "has_ensures": true,
     "has_trusted_assumption": false
@@ -185,6 +186,7 @@ probe-verus specify ./src -a atoms.json -o my-specs.json
 - **Key**: The probe-name from atoms.json
 - **`code-path`**: Source file path
 - **`spec-text`**: Function span with `lines-start` and `lines-end`
+- **`specified`**: Whether the function has a specification (`has_requires` or `has_ensures` is true)
 - **`has_requires`**: Whether the function has a `requires` clause (precondition)
 - **`has_ensures`**: Whether the function has an `ensures` clause (postcondition)
 - **`has_trusted_assumption`**: Whether the function contains `assume()` or `admit()`
@@ -199,6 +201,7 @@ probe-verus specify ./src -a atoms.json -o my-specs.json
       "lines-start": 42,
       "lines-end": 60
     },
+    "specified": true,
     "has_requires": true,
     "has_ensures": true,
     "has_trusted_assumption": false,

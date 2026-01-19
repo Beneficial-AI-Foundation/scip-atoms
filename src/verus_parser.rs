@@ -454,6 +454,9 @@ pub struct FunctionInfo {
     pub visibility: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<String>, // "impl", "trait", or "standalone"
+    /// Whether the function has a specification (requires or ensures clause)
+    #[serde(default)]
+    pub specified: bool,
     /// Whether the function has requires clause (precondition)
     #[serde(default)]
     pub has_requires: bool,
@@ -661,6 +664,7 @@ impl FunctionInfoVisitor {
             kind,
             visibility,
             context,
+            specified: has_requires || has_ensures,
             has_requires,
             has_ensures,
             has_trusted_assumption,
