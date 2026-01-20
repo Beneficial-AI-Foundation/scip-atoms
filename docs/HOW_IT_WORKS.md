@@ -4,9 +4,9 @@ This document explains the internals of probe-verus and how each command works.
 
 ---
 
-## SCIP-based Call Graph (`atoms` command)
+## SCIP-based Call Graph (`atomize` command)
 
-The `atoms` command generates a call graph from SCIP (Source Code Index Protocol) data.
+The `atomize` command generates a call graph from SCIP (Source Code Index Protocol) data.
 
 ### Pipeline
 
@@ -72,9 +72,9 @@ Both produce similar SCIP symbols. The tool uses multiple strategies:
 
 ---
 
-## Function Parsing (`functions` command)
+## Function Parsing (`list-functions` command)
 
-The `functions` command uses `verus_syn` to parse Rust/Verus source files directly, without needing SCIP data.
+The `list-functions` command uses `verus_syn` to parse Rust/Verus source files directly, without needing SCIP data.
 
 ### What it parses
 
@@ -105,6 +105,51 @@ When `--show-visibility` or `--show-kind` are enabled:
 - **Visibility**: `pub`, `pub(crate)`, `pub(super)`, or `private`
 - **Kind**: `fn`, `spec fn`, `proof fn`, `exec fn`, `const fn`, etc.
 - **Context**: `standalone`, `impl`, or `trait`
+
+---
+
+## Specification Extraction (`specify` command)
+
+The `specify` command extracts function specifications (requires/ensures clauses) from source files, keyed by probe-name from atoms.json.
+
+### Pipeline
+
+1. **Load atoms.json** to get the probe-name → function mappings
+2. **Parse source files** with `verus_syn` to extract:
+   - Function definitions with their spans
+   - Whether each function has `requires` clauses
+   - Whether each function has `ensures` clauses
+   - Whether each function contains `assume()` or `admit()` calls
+3. **Match functions to atoms** using:
+   - Path matching (by suffix comparison)
+   - Display name matching
+   - Line number proximity (SCIP line within function span or within tolerance)
+4. **Output JSON** keyed by probe-name
+
+### Matching Strategy
+
+Functions are matched to atoms from atoms.json using multiple criteria:
+
+1. **Path match**: File paths must match by suffix (e.g., `src/lib.rs` matches `project/src/lib.rs`)
+2. **Name match**: Function display name must match exactly
+3. **Line match**: The SCIP line number from atoms.json must either:
+   - Fall within the function's span `[start_line, end_line]`
+   - Be within a small tolerance of `start_line`
+
+This handles cases where `verus_syn` includes doc comments in function spans (reporting an earlier start line) while `verus-analyzer` reports the actual function declaration line.
+
+### Output Fields
+
+- **`code-path`**: Source file path
+- **`spec-text`**: Line range with `lines-start` and `lines-end`
+- **`specified`**: Whether the function has any specification (`has_requires` or `has_ensures`)
+- **`has_requires`**: Whether the function has a `requires` clause
+- **`has_ensures`**: Whether the function has an `ensures` clause
+- **`has_trusted_assumption`**: Whether the function contains `assume()` or `admit()`
+
+With `--with-spec-text`, raw specification text is also included:
+- **`requires_text`**: Raw text of the requires clause
+- **`ensures_text`**: Raw text of the ensures clause
 
 ---
 
