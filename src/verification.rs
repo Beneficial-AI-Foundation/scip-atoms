@@ -929,7 +929,11 @@ impl VerificationAnalyzer {
 
                 for func in &verifiable_functions {
                     let file_path = func.file.clone().unwrap_or_default();
-                    let key = (func.name.clone(), file_path.clone(), func.spec_text.lines_start);
+                    let key = (
+                        func.name.clone(),
+                        file_path.clone(),
+                        func.spec_text.lines_start,
+                    );
 
                     let location = FunctionLocation {
                         display_name: func.name.clone(),

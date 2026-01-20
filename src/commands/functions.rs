@@ -62,7 +62,11 @@ pub fn cmd_functions(
         }
         OutputFormat::Text => {
             // Just print function names, one per line
-            let mut names: Vec<_> = parsed_output.functions.iter().map(|f| f.name.as_str()).collect();
+            let mut names: Vec<_> = parsed_output
+                .functions
+                .iter()
+                .map(|f| f.name.as_str())
+                .collect();
             names.sort();
             names.dedup();
             for name in names {
@@ -79,7 +83,10 @@ pub fn cmd_functions(
                     print!(" ({})", vis);
                 }
                 if let Some(ref file) = func.file {
-                    print!(" @ {}:{}:{}", file, func.spec_text.lines_start, func.spec_text.lines_end);
+                    print!(
+                        " @ {}:{}:{}",
+                        file, func.spec_text.lines_start, func.spec_text.lines_end
+                    );
                 }
                 if let Some(ref context) = func.context {
                     print!(" in {}", context);
