@@ -96,6 +96,9 @@ pub const DEFAULT_RESULTS_OUTPUT: &str = "proofs.json";
 /// Default output filename for specify command
 pub const DEFAULT_SPECS_OUTPUT: &str = "specs.json";
 
+/// Default output filename for stubify command
+pub const DEFAULT_STUBS_OUTPUT: &str = "stubs.json";
+
 /// Default output directory for run command
 pub const DEFAULT_OUTPUT_DIR: &str = "./output";
 

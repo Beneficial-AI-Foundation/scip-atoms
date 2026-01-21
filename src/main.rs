@@ -5,15 +5,20 @@
 //! - `list-functions`: List all functions in a Rust/Verus project
 //! - `verify`: Run Verus verification and analyze results (or analyze existing output)
 //! - `specify`: Extract function specifications (requires/ensures) to JSON
+//! - `stubify`: Convert .md files with YAML frontmatter to JSON
 //! - `run`: Run both atomize and verify (designed for Docker/CI usage)
 
 use clap::{Parser, Subcommand};
-use probe_verus::constants::{DEFAULT_ATOMS_OUTPUT, DEFAULT_OUTPUT_DIR, DEFAULT_SPECS_OUTPUT};
+use probe_verus::constants::{
+    DEFAULT_ATOMS_OUTPUT, DEFAULT_OUTPUT_DIR, DEFAULT_SPECS_OUTPUT, DEFAULT_STUBS_OUTPUT,
+};
 use std::path::PathBuf;
 
 // Import command implementations
 mod commands;
-use commands::{cmd_atomize, cmd_functions, cmd_run, cmd_specify, cmd_verify, OutputFormat};
+use commands::{
+    cmd_atomize, cmd_functions, cmd_run, cmd_specify, cmd_stubify, cmd_verify, OutputFormat,
+};
 
 #[derive(Parser)]
 #[command(name = "probe-verus")]
@@ -134,6 +139,20 @@ enum Commands {
         with_spec_text: bool,
     },
 
+    /// Convert .md files with YAML frontmatter to JSON
+    ///
+    /// Walks a directory hierarchy of .md files (like those in .verilib/structure),
+    /// parses the YAML frontmatter from each file, and outputs a JSON file where
+    /// keys are the file paths and values are the frontmatter fields.
+    Stubify {
+        /// Path to directory containing .md files
+        path: PathBuf,
+
+        /// Output file path (default: stubs.json)
+        #[arg(short, long, default_value = DEFAULT_STUBS_OUTPUT)]
+        output: PathBuf,
+    },
+
     /// Run both atomize and verify commands (designed for Docker/CI usage)
     ///
     /// This is the recommended entrypoint for Docker containers and CI pipelines.
@@ -229,6 +248,9 @@ fn main() {
             with_spec_text,
         } => {
             cmd_specify(path, output, with_atoms, with_spec_text);
+        }
+        Commands::Stubify { path, output } => {
+            cmd_stubify(path, output);
         }
         Commands::Run {
             project_path,

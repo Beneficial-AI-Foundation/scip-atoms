@@ -17,11 +17,68 @@ See [INSTALL.md](INSTALL.md) for detailed installation instructions.
 probe-verus <COMMAND>
 
 Commands:
+  stubify         Convert .md files with YAML frontmatter to JSON
   atomize         Generate call graph atoms with line numbers from SCIP indexes
   list-functions  List all functions in a Rust/Verus project
   specify         Extract function specifications from atoms.json
   verify          Run Verus verification and analyze results
 ```
+
+---
+
+### `stubify` - Convert Stub Files to JSON
+
+Convert a directory hierarchy of `.md` files with YAML frontmatter to a JSON file. This is useful for processing verification stub files (like those in `.verilib/structure`).
+
+```bash
+probe-verus stubify <PATH> [OPTIONS]
+
+Options:
+  -o, --output <FILE>    Output file path (default: stubs.json)
+```
+
+**Examples:**
+```bash
+probe-verus stubify .verilib/structure
+probe-verus stubify .verilib/structure -o stubs.json
+```
+
+**Expected input format:**
+
+Each `.md` file should have YAML frontmatter with the following fields:
+
+```markdown
+---
+code-line: 123
+code-path: src/lib.rs
+code-name: scip:crate/1.0.0/module#function()
+---
+```
+
+**Output format:**
+
+The output is a dictionary keyed by relative file path:
+
+```json
+{
+  "edwards.rs/EdwardsPoint.identity().md": {
+    "code-line": 821,
+    "code-path": "curve25519-dalek/src/edwards.rs",
+    "code-name": "scip:curve25519-dalek/4.1.3/edwards/EdwardsPoint#Identity<EdwardsPoint>#identity()"
+  },
+  "subdir/another.md": {
+    "code-line": 456,
+    "code-path": "src/main.rs",
+    "code-name": "scip:crate/1.0.0/module#another()"
+  }
+}
+```
+
+**Field descriptions:**
+- **Key**: Relative path of the `.md` file from the input directory
+- **`code-line`**: Line number in the source file
+- **`code-path`**: Path to the source file
+- **`code-name`**: SCIP-style identifier for the function
 
 ---
 
