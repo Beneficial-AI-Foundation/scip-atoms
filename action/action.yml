@@ -1,0 +1,252 @@
+# BAIF Verus Verify Action
+# Runs Verus formal verification and produces verification results JSON
+#
+# Usage:
+#   - uses: beneficial-ai-foundation/probe-verus/action@v1
+#     with:
+#       project-path: ./my-verus-crate
+#     # outputs: results-file, atoms-file, verified-count, total-functions
+
+name: 'BAIF Verus Verify'
+description: 'Run Verus formal verification on a Rust/Verus project and produce verification results'
+author: 'Beneficial AI Foundation'
+
+branding:
+  icon: 'check-circle'
+  color: 'green'
+
+inputs:
+  project-path:
+    description: 'Path to the Verus project (directory containing Cargo.toml with verus metadata)'
+    required: true
+  package:
+    description: 'Package name for workspace projects (passed to probe-verus verify -p)'
+    required: false
+    default: ''
+  verus-version:
+    description: 'Verus version to use (default: auto-detect from Cargo.toml [package.metadata.verus] release)'
+    required: false
+    default: ''
+  rust-version:
+    description: 'Rust toolchain version (default: auto-detect from Cargo.toml [package.metadata.verus] rust-version)'
+    required: false
+    default: ''
+  output-dir:
+    description: 'Directory for output files (default: current directory)'
+    required: false
+    default: '.'
+
+outputs:
+  results-file:
+    description: 'Path to the verification results JSON file'
+    value: ${{ steps.verify.outputs.results_file }}
+  atoms-file:
+    description: 'Path to the atoms JSON file (call graph)'
+    value: ${{ steps.atomize.outputs.atoms_file }}
+  verified-count:
+    description: 'Number of functions verified'
+    value: ${{ steps.verify.outputs.verified_count }}
+  total-functions:
+    description: 'Total number of functions'
+    value: ${{ steps.verify.outputs.total_count }}
+
+runs:
+  using: 'composite'
+  steps:
+    # Step 1: Extract versions from Cargo.toml if not provided
+    - name: Extract versions from Cargo.toml
+      id: versions
+      shell: bash
+      run: |
+        PROJECT_PATH="${{ inputs.project-path }}"
+        CARGO_TOML="$PROJECT_PATH/Cargo.toml"
+        
+        if [ ! -f "$CARGO_TOML" ]; then
+          echo "::error::Cargo.toml not found at $CARGO_TOML"
+          exit 1
+        fi
+        
+        # Extract [package.metadata.verus] section
+        METADATA=$(awk '/^\[package.metadata.verus\]/{flag=1;next}/^\[.*\]/{flag=0}flag' "$CARGO_TOML")
+        
+        # Get Verus version (from input or Cargo.toml)
+        VERUS_VERSION="${{ inputs.verus-version }}"
+        if [ -z "$VERUS_VERSION" ]; then
+          VERUS_VERSION=$(echo "$METADATA" | grep -E '^\s*release\s*=' | sed 's/.*= *"\([^"]*\)".*/\1/' | head -1)
+          if [ -z "$VERUS_VERSION" ]; then
+            echo "::error::No Verus version found. Provide verus-version input or add [package.metadata.verus] release to Cargo.toml"
+            exit 1
+          fi
+          echo "Auto-detected Verus version: $VERUS_VERSION"
+        fi
+        
+        # Get Rust version (from input or Cargo.toml)
+        RUST_VERSION="${{ inputs.rust-version }}"
+        if [ -z "$RUST_VERSION" ]; then
+          RUST_VERSION=$(echo "$METADATA" | grep -E '^\s*rust-version\s*=' | sed 's/.*= *"\([^"]*\)".*/\1/' | head -1)
+          if [ -z "$RUST_VERSION" ]; then
+            # Default to stable if not specified
+            RUST_VERSION="stable"
+            echo "No Rust version found, using: $RUST_VERSION"
+          else
+            echo "Auto-detected Rust version: $RUST_VERSION"
+          fi
+        fi
+        
+        echo "verus_version=$VERUS_VERSION" >> $GITHUB_OUTPUT
+        echo "rust_version=$RUST_VERSION" >> $GITHUB_OUTPUT
+
+    # Step 2: Install Rust toolchain
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ steps.versions.outputs.rust_version }}
+
+    # Step 3: Cache cargo registry
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.cargo/bin
+        key: ${{ runner.os }}-cargo-verus-${{ steps.versions.outputs.verus_version }}-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-verus-${{ steps.versions.outputs.verus_version }}-
+          ${{ runner.os }}-cargo-verus-
+          ${{ runner.os }}-cargo-
+
+    # Step 4: Install verus-analyzer
+    - name: Install verus-analyzer
+      shell: bash
+      run: |
+        if command -v verus-analyzer &> /dev/null; then
+          echo "verus-analyzer already installed (from cache)"
+          verus-analyzer --version
+        else
+          echo "Installing verus-analyzer..."
+          VERUS_URL=$(curl -s https://api.github.com/repos/verus-lang/verus-analyzer/releases/latest | jq -r '.assets[] | select(.name == "verus-analyzer-x86_64-unknown-linux-gnu.gz") | .browser_download_url')
+          if [ -z "$VERUS_URL" ] || [ "$VERUS_URL" = "null" ]; then
+            echo "::error::Failed to determine verus-analyzer download URL"
+            exit 1
+          fi
+          wget -q "$VERUS_URL" -O verus-analyzer.gz
+          gunzip verus-analyzer.gz
+          chmod +x verus-analyzer
+          sudo mv verus-analyzer /usr/local/bin/
+          verus-analyzer --version
+        fi
+
+    # Step 5: Install Verus
+    - name: Install Verus
+      shell: bash
+      env:
+        VERUS_VERSION: ${{ steps.versions.outputs.verus_version }}
+      run: |
+        if [ -x ~/.cargo/bin/verus-x86-linux/verus ]; then
+          CACHED_VERSION=$(~/.cargo/bin/verus-x86-linux/verus --version 2>/dev/null | head -1 || echo "unknown")
+          if echo "$CACHED_VERSION" | grep -q "$VERUS_VERSION"; then
+            echo "Verus $VERUS_VERSION already installed (from cache)"
+            exit 0
+          else
+            echo "Cached Verus version mismatch, reinstalling..."
+            rm -rf ~/.cargo/bin/verus-x86-linux
+          fi
+        fi
+        
+        echo "Installing Verus $VERUS_VERSION..."
+        VERUS_URL="https://github.com/verus-lang/verus/releases/download/release%2F${VERUS_VERSION}/verus-${VERUS_VERSION}-x86-linux.zip"
+        wget -q "$VERUS_URL" -O verus.zip
+        unzip -q verus.zip
+        mv verus-x86-linux ~/.cargo/bin/
+        cd ~/.cargo/bin
+        ln -sf verus-x86-linux/cargo-verus
+        echo "Verus $VERUS_VERSION installed"
+
+    # Step 6: Install scip CLI
+    - name: Install scip CLI
+      shell: bash
+      run: |
+        if command -v scip &> /dev/null; then
+          echo "scip already installed (from cache)"
+          scip --version
+        else
+          echo "Installing scip..."
+          SCIP_URL=$(curl -s https://api.github.com/repos/sourcegraph/scip/releases/latest | jq -r '.assets[] | select(.name == "scip-linux-amd64.tar.gz") | .browser_download_url')
+          if [ -z "$SCIP_URL" ] || [ "$SCIP_URL" = "null" ]; then
+            echo "::error::Failed to determine SCIP download URL"
+            exit 1
+          fi
+          wget -q "$SCIP_URL" -O scip-linux.tar.gz
+          tar -xzf scip-linux.tar.gz
+          chmod +x scip
+          sudo mv scip /usr/local/bin/
+          scip --version
+        fi
+
+    # Step 7: Install probe-verus
+    - name: Install probe-verus
+      shell: bash
+      run: |
+        echo "Installing probe-verus..."
+        cargo install --force --git https://github.com/Beneficial-AI-Foundation/probe-verus
+        probe-verus --version || echo "probe-verus installed"
+
+    # Step 8: Run probe-verus atomize
+    - name: Run probe-verus atomize
+      id: atomize
+      shell: bash
+      run: |
+        PROJECT_PATH="${{ inputs.project-path }}"
+        OUTPUT_DIR="${{ inputs.output-dir }}"
+        ATOMS_FILE="$OUTPUT_DIR/atoms.json"
+        
+        echo "=== Running probe-verus atomize ==="
+        echo "Project: $PROJECT_PATH"
+        
+        probe-verus atomize "$PROJECT_PATH" -o "$ATOMS_FILE"
+        
+        echo ""
+        echo "=== Generated atoms.json ==="
+        ls -la "$ATOMS_FILE"
+        ATOM_COUNT=$(jq 'length' "$ATOMS_FILE")
+        echo "Number of atoms: $ATOM_COUNT"
+        
+        echo "atoms_file=$(realpath "$ATOMS_FILE")" >> $GITHUB_OUTPUT
+
+    # Step 9: Run probe-verus verify
+    - name: Run probe-verus verify
+      id: verify
+      shell: bash
+      run: |
+        PROJECT_PATH="${{ inputs.project-path }}"
+        OUTPUT_DIR="${{ inputs.output-dir }}"
+        RESULTS_FILE="$OUTPUT_DIR/results.json"
+        ATOMS_FILE="$OUTPUT_DIR/atoms.json"
+        PACKAGE="${{ inputs.package }}"
+        
+        echo "=== Running probe-verus verify ==="
+        echo "Project: $PROJECT_PATH"
+        
+        # Build command
+        CMD="probe-verus verify $PROJECT_PATH -o $RESULTS_FILE -a $ATOMS_FILE"
+        if [ -n "$PACKAGE" ]; then
+          CMD="$CMD -p $PACKAGE"
+        fi
+        
+        echo "Running: $CMD"
+        $CMD
+        
+        echo ""
+        echo "=== Verification Results ==="
+        ls -la "$RESULTS_FILE"
+        
+        # Extract summary
+        VERIFIED=$(jq -r '.summary.verified // 0' "$RESULTS_FILE")
+        TOTAL=$(jq -r '.summary.total // 0' "$RESULTS_FILE")
+        
+        echo "Verified: $VERIFIED / $TOTAL"
+        
+        echo "results_file=$(realpath "$RESULTS_FILE")" >> $GITHUB_OUTPUT
+        echo "verified_count=$VERIFIED" >> $GITHUB_OUTPUT
+        echo "total_count=$TOTAL" >> $GITHUB_OUTPUT
