@@ -53,7 +53,8 @@ docker run --rm --user root \
 docker run --rm --user root \
   -v ~/my-workspace:/workspace/project \
   -v ~/output:/workspace/output \
-  probe-verus /workspace/project -o /workspace/output --package my-crate
+  ghcr.io/beneficial-ai-foundation/probe-verus:latest \
+  /workspace/project -o /workspace/output --package my-crate
 ```
 
 ### Atomize only (skip verification)
@@ -62,7 +63,8 @@ docker run --rm --user root \
 docker run --rm --user root \
   -v ~/my-project:/workspace/project \
   -v ~/output:/workspace/output \
-  probe-verus /workspace/project -o /workspace/output --atomize-only
+  ghcr.io/beneficial-ai-foundation/probe-verus:latest \
+  /workspace/project -o /workspace/output --atomize-only
 ```
 
 ### Force SCIP regeneration
@@ -71,7 +73,8 @@ docker run --rm --user root \
 docker run --rm --user root \
   -v ~/my-project:/workspace/project \
   -v ~/output:/workspace/output \
-  probe-verus /workspace/project -o /workspace/output --regenerate-scip
+  ghcr.io/beneficial-ai-foundation/probe-verus:latest \
+  /workspace/project -o /workspace/output --regenerate-scip
 ```
 
 ### Verbose output for debugging
@@ -80,7 +83,8 @@ docker run --rm --user root \
 docker run --rm --user root \
   -v ~/my-project:/workspace/project \
   -v ~/output:/workspace/output \
-  probe-verus /workspace/project -o /workspace/output --verbose
+  ghcr.io/beneficial-ai-foundation/probe-verus:latest \
+  /workspace/project -o /workspace/output --verbose
 ```
 
 ## Output Files
