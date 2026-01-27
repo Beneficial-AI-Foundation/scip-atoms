@@ -162,6 +162,16 @@ The Docker image includes:
 Customize the build with these arguments:
 
 ```bash
+# Use specific Verus version
+docker build -t probe-verus -f docker/Dockerfile \
+  --build-arg VERUS_VERSION=release/0.2026.01.23.1650a05 \
+  .
+
+# Use latest prerelease (rolling)
+docker build -t probe-verus -f docker/Dockerfile \
+  --build-arg VERUS_VERSION=prerelease \
+  .
+
 # Use specific user/group IDs
 docker build -t probe-verus -f docker/Dockerfile \
   --build-arg USER_UID=1001 \
@@ -171,11 +181,12 @@ docker build -t probe-verus -f docker/Dockerfile \
 
 | Argument | Default | Description |
 |----------|---------|-------------|
+| `VERUS_VERSION` | `latest` | Verus version: `latest`, `prerelease`, or specific tag (e.g., `release/0.2026.01.23.1650a05`) |
 | `RUST_VERSION` | `1.88.0` | Base Rust toolchain (for building probe-verus) |
 | `USER_UID` | `1000` | UID for the non-root user |
 | `USER_GID` | `1000` | GID for the non-root user |
 
-**Note:** The Rust toolchain required by Verus is detected and installed automatically from the latest Verus release.
+**Note:** The Rust toolchain required by Verus is automatically detected from the release's `rust-toolchain.toml` file.
 
 ## Security
 
