@@ -5,8 +5,10 @@
 #   - Published releases
 #
 # Images are published to:
-#   ghcr.io/beneficial-ai-foundation/probe-verus:latest
-#   ghcr.io/beneficial-ai-foundation/probe-verus:v0.1.0 (on release)
+#   ghcr.io/beneficial-ai-foundation/probe-verus:latest (main branch + releases)
+#   ghcr.io/beneficial-ai-foundation/probe-verus:v1 (on release with v1 tag)
+#   ghcr.io/beneficial-ai-foundation/probe-verus:1.0.0 (on semver release)
+#   ghcr.io/beneficial-ai-foundation/probe-verus:<sha> (all builds)
 #
 name: Docker Publish
 
@@ -67,9 +69,11 @@ jobs:
           # Optional: Add Docker Hub image
           # docker.io/yourorg/probe-verus
           tags: |
-            # Set latest tag for main branch
-            type=raw,value=latest,enable={{is_default_branch}}
-            # Set version tag for releases (v0.1.0)
+            # Set latest tag for main branch pushes and releases
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') || github.event_name == 'release' }}
+            # Capture any tag (handles v1, v1.0.0, etc.)
+            type=ref,event=tag
+            # Set semver tags for proper version releases (v1.0.0 -> 1.0.0, 1.0)
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             # Set sha tag for all builds
