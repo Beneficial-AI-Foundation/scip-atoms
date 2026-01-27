@@ -53,6 +53,12 @@ outputs:
   total-functions:
     description: 'Total number of functions'
     value: ${{ steps.verify.outputs.total_count }}
+  verus-version:
+    description: 'Verus version used for verification'
+    value: ${{ steps.versions.outputs.verus_version }}
+  rust-version:
+    description: 'Rust toolchain version used'
+    value: ${{ steps.versions.outputs.rust_version }}
 
 runs:
   using: 'composite'
