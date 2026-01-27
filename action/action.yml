@@ -35,6 +35,10 @@ inputs:
     description: 'Directory for output files (default: current directory)'
     required: false
     default: '.'
+  token:
+    description: 'GitHub token for API calls (avoids rate limiting)'
+    required: false
+    default: ${{ github.token }}
 
 outputs:
   results-file:
@@ -119,15 +123,20 @@ runs:
     # Step 4: Install verus-analyzer
     - name: Install verus-analyzer
       shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
       run: |
         if command -v verus-analyzer &> /dev/null; then
           echo "verus-analyzer already installed (from cache)"
           verus-analyzer --version
         else
           echo "Installing verus-analyzer..."
-          VERUS_URL=$(curl -s https://api.github.com/repos/verus-lang/verus-analyzer/releases/latest | jq -r '.assets[] | select(.name == "verus-analyzer-x86_64-unknown-linux-gnu.gz") | .browser_download_url')
+          # Use authenticated request to avoid rate limiting
+          VERUS_URL=$(curl -sL -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/verus-lang/verus-analyzer/releases/latest | \
+            jq -r '.assets[] | select(.name == "verus-analyzer-x86_64-unknown-linux-gnu.gz") | .browser_download_url')
           if [ -z "$VERUS_URL" ] || [ "$VERUS_URL" = "null" ]; then
-            echo "::error::Failed to determine verus-analyzer download URL"
+            echo "::error::Failed to determine verus-analyzer download URL from GitHub API"
             exit 1
           fi
           wget -q "$VERUS_URL" -O verus-analyzer.gz
@@ -166,15 +175,20 @@ runs:
     # Step 6: Install scip CLI
     - name: Install scip CLI
       shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
       run: |
         if command -v scip &> /dev/null; then
           echo "scip already installed (from cache)"
           scip --version
         else
           echo "Installing scip..."
-          SCIP_URL=$(curl -s https://api.github.com/repos/sourcegraph/scip/releases/latest | jq -r '.assets[] | select(.name == "scip-linux-amd64.tar.gz") | .browser_download_url')
+          # Use authenticated request to avoid rate limiting
+          SCIP_URL=$(curl -sL -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/sourcegraph/scip/releases/latest | \
+            jq -r '.assets[] | select(.name == "scip-linux-amd64.tar.gz") | .browser_download_url')
           if [ -z "$SCIP_URL" ] || [ "$SCIP_URL" = "null" ]; then
-            echo "::error::Failed to determine SCIP download URL"
+            echo "::error::Failed to determine SCIP download URL from GitHub API"
             exit 1
           fi
           wget -q "$SCIP_URL" -O scip-linux.tar.gz
