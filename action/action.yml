@@ -244,9 +244,24 @@ runs:
         echo "=== Verification Results ==="
         ls -la "$RESULTS_FILE"
         
-        # Extract summary
-        VERIFIED=$(jq -r '.summary.verified // 0' "$RESULTS_FILE")
-        TOTAL=$(jq -r '.summary.total // 0' "$RESULTS_FILE")
+        # Extract summary - handle both formats:
+        # 1. New format (with -a atoms.json): dictionary keyed by function name with "verified" boolean
+        # 2. Old format: object with .summary.verified and .summary.total
+        if jq -e 'type == "object" and (keys | length) > 0 and (.[keys[0]] | has("verified"))' "$RESULTS_FILE" > /dev/null 2>&1; then
+          # New format: dictionary keyed by function name
+          TOTAL=$(jq 'keys | length' "$RESULTS_FILE")
+          VERIFIED=$(jq '[.[] | select(.verified == true)] | length' "$RESULTS_FILE")
+          echo "Parsed new format (dictionary with verified field)"
+        elif jq -e '.summary' "$RESULTS_FILE" > /dev/null 2>&1; then
+          # Old format with .summary
+          VERIFIED=$(jq -r '.summary.verified // .summary.verified_functions // 0' "$RESULTS_FILE")
+          TOTAL=$(jq -r '.summary.total // .summary.total_functions // 0' "$RESULTS_FILE")
+          echo "Parsed old format (with .summary)"
+        else
+          echo "WARNING: Could not parse results.json format, defaulting to 0"
+          VERIFIED=0
+          TOTAL=0
+        fi
         
         echo "Verified: $VERIFIED / $TOTAL"
         
