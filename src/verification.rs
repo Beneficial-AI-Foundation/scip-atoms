@@ -12,7 +12,7 @@ use crate::CodeTextInfo;
 use regex::Regex;
 use rust_lapper::{Interval, Lapper};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -783,7 +783,8 @@ pub struct FunctionVerificationEntry {
 }
 
 /// New output format for proofs.json - a dictionary keyed by code-name
-pub type ProofsOutput = HashMap<String, FunctionVerificationEntry>;
+/// Uses BTreeMap for deterministic (sorted) key order in JSON output
+pub type ProofsOutput = BTreeMap<String, FunctionVerificationEntry>;
 
 /// Verification output analyzer
 ///
