@@ -81,8 +81,8 @@ pub struct MatchCriteria {
 
 /// Load a taxonomy config from a TOML file.
 pub fn load_taxonomy_config(path: &Path) -> Result<TaxonomyConfig, String> {
-    let content =
-        std::fs::read_to_string(path).map_err(|e| format!("Failed to read taxonomy config: {e}"))?;
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read taxonomy config: {e}"))?;
     toml::from_str(&content).map_err(|e| format!("Failed to parse taxonomy config: {e}"))
 }
 
@@ -114,8 +114,12 @@ pub fn classify_function(func: &FunctionInfo, config: &TaxonomyConfig) -> Vec<St
 /// Create a copy of FunctionInfo with stop words removed from ensures_calls and requires_calls.
 fn filter_stop_words(func: &FunctionInfo, stop_words: &[String]) -> FunctionInfo {
     let mut filtered = func.clone();
-    filtered.ensures_calls.retain(|c| !stop_words.iter().any(|sw| c == sw));
-    filtered.requires_calls.retain(|c| !stop_words.iter().any(|sw| c == sw));
+    filtered
+        .ensures_calls
+        .retain(|c| !stop_words.iter().any(|sw| c == sw));
+    filtered
+        .requires_calls
+        .retain(|c| !stop_words.iter().any(|sw| c == sw));
     filtered
 }
 
@@ -234,10 +238,7 @@ fn explain_rule_match(func: &FunctionInfo, criteria: &MatchCriteria) -> Vec<(Str
             .ensures_calls_full
             .iter()
             .any(|call| patterns.iter().any(|pat| call.contains(pat.as_str())));
-        results.push((
-            format!("ensures_calls_full_contain={:?}", patterns),
-            passed,
-        ));
+        results.push((format!("ensures_calls_full_contain={:?}", patterns), passed));
     }
 
     if let Some(patterns) = &criteria.requires_calls_full_contain {
@@ -595,10 +596,7 @@ mod tests {
         // Exec function with ensures but NO function calls in ensures -> should match
         let mut func = make_func(FunctionMode::Exec, vec![]);
         func.has_ensures = true;
-        assert_eq!(
-            classify_function(&func, &config),
-            vec!["memory-safety"]
-        );
+        assert_eq!(classify_function(&func, &config), vec!["memory-safety"]);
 
         // Exec function with ensures AND function calls -> should NOT match
         let func2 = make_func(FunctionMode::Exec, vec!["spec_foo"]);
@@ -629,10 +627,7 @@ mod tests {
         // Function with ensures calls that are ALL stop words -> after filtering, empty
         let mut func = make_func(FunctionMode::Exec, vec!["len", "old"]);
         func.has_ensures = true;
-        assert_eq!(
-            classify_function(&func, &config),
-            vec!["memory-safety"]
-        );
+        assert_eq!(classify_function(&func, &config), vec!["memory-safety"]);
 
         // Function with ensures calls that include non-stop-word -> not empty after filtering
         let mut func2 = make_func(FunctionMode::Exec, vec!["len", "recover"]);

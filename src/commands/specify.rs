@@ -60,10 +60,7 @@ pub fn cmd_specify(
     // Load taxonomy config if provided
     let taxonomy_config = taxonomy_config_path.map(|tc_path| {
         if !tc_path.exists() {
-            eprintln!(
-                "Error: taxonomy config not found at {}",
-                tc_path.display()
-            );
+            eprintln!("Error: taxonomy config not found at {}", tc_path.display());
             std::process::exit(1);
         }
         match taxonomy::load_taxonomy_config(&tc_path) {
@@ -99,10 +96,8 @@ pub fn cmd_specify(
             if taxonomy_explain {
                 if let Some(config) = taxonomy_config.as_ref() {
                     let explanations = taxonomy::explain_function(&func, config);
-                    let matched: Vec<_> =
-                        explanations.iter().filter(|e| e.matched).collect();
-                    let missed: Vec<_> =
-                        explanations.iter().filter(|e| !e.matched).collect();
+                    let matched: Vec<_> = explanations.iter().filter(|e| e.matched).collect();
+                    let missed: Vec<_> = explanations.iter().filter(|e| !e.matched).collect();
 
                     if !matched.is_empty() || func.specified {
                         eprintln!("  {}", code_name);
@@ -116,11 +111,7 @@ pub fn cmd_specify(
                                 .filter(|(_, p)| !p)
                                 .map(|(name, _)| name.as_str())
                                 .collect();
-                            eprintln!(
-                                "    missed  {} (failed: {})",
-                                exp.label,
-                                failed.join(", ")
-                            );
+                            eprintln!("    missed  {} (failed: {})", exp.label, failed.join(", "));
                         }
                     }
                 }
@@ -130,10 +121,13 @@ pub fn cmd_specify(
                 .as_ref()
                 .map(|config| taxonomy::classify_function(&func, config))
                 .unwrap_or_default();
-            (code_name, SpecifyEntry {
-                info: func,
-                spec_labels,
-            })
+            (
+                code_name,
+                SpecifyEntry {
+                    info: func,
+                    spec_labels,
+                },
+            )
         })
         .collect();
 

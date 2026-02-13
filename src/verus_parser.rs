@@ -575,10 +575,18 @@ pub struct FunctionInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ensures_text: Option<String>,
     /// Function names called in the ensures clause (extracted from AST, short names)
-    #[serde(rename = "ensures-calls", skip_serializing_if = "Vec::is_empty", default)]
+    #[serde(
+        rename = "ensures-calls",
+        skip_serializing_if = "Vec::is_empty",
+        default
+    )]
     pub ensures_calls: Vec<String>,
     /// Function names called in the requires clause (extracted from AST, short names)
-    #[serde(rename = "requires-calls", skip_serializing_if = "Vec::is_empty", default)]
+    #[serde(
+        rename = "requires-calls",
+        skip_serializing_if = "Vec::is_empty",
+        default
+    )]
     pub requires_calls: Vec<String>,
     /// Full qualified paths of function calls in ensures (e.g., "crate::spec::is_canonical")
     #[serde(
