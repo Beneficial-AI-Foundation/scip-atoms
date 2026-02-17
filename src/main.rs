@@ -17,7 +17,8 @@ use std::path::PathBuf;
 // Import command implementations
 mod commands;
 use commands::{
-    cmd_atomize, cmd_functions, cmd_run, cmd_specify, cmd_stubify, cmd_verify, OutputFormat,
+    cmd_atomize, cmd_functions, cmd_run, cmd_specify, cmd_specs_data, cmd_stubify, cmd_tracked_csv,
+    cmd_verify, OutputFormat,
 };
 
 #[derive(Parser)]
@@ -151,6 +152,44 @@ enum Commands {
         taxonomy_explain: bool,
     },
 
+    /// Generate specs_data.json for the specs browser
+    ///
+    /// Replaces the Python scripts (extract_specs.py + analyze_verus_specs_proofs.py)
+    /// by auto-discovering all functions from the AST. Outputs JSON matching the
+    /// existing specs_data.json schema consumed by docs/specs.js.
+    #[command(name = "specs-data")]
+    SpecsData {
+        /// Path to the source directory (e.g., curve25519-dalek/src)
+        src_path: PathBuf,
+
+        /// Output file path (default: specs_data.json)
+        #[arg(short, long, default_value = "specs_data.json")]
+        output: PathBuf,
+
+        /// GitHub base URL for source links
+        #[arg(long)]
+        github_base_url: Option<String>,
+    },
+
+    /// Generate tracked functions CSV for the dashboard
+    ///
+    /// Replaces analyze_verus_specs_proofs.py by auto-discovering all functions
+    /// with specs from the AST. Outputs CSV with columns:
+    /// function,module,link,has_spec,has_proof
+    #[command(name = "tracked-csv")]
+    TrackedCsv {
+        /// Path to the source directory (e.g., curve25519-dalek/src)
+        src_path: PathBuf,
+
+        /// Output file path (default: outputs/curve25519_functions.csv)
+        #[arg(short, long, default_value = "outputs/curve25519_functions.csv")]
+        output: PathBuf,
+
+        /// GitHub base URL for source links
+        #[arg(long)]
+        github_base_url: Option<String>,
+    },
+
     /// Convert .md files with YAML frontmatter to JSON
     ///
     /// Walks a directory hierarchy of .md files (like those in .verilib/structure),
@@ -271,6 +310,20 @@ fn main() {
                 taxonomy_config,
                 taxonomy_explain,
             );
+        }
+        Commands::SpecsData {
+            src_path,
+            output,
+            github_base_url,
+        } => {
+            cmd_specs_data(src_path, output, github_base_url);
+        }
+        Commands::TrackedCsv {
+            src_path,
+            output,
+            github_base_url,
+        } => {
+            cmd_tracked_csv(src_path, output, github_base_url);
         }
         Commands::Stubify { path, output } => {
             cmd_stubify(path, output);

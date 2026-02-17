@@ -13,7 +13,7 @@ use std::fs;
 use std::path::Path;
 use verus_syn::spanned::Spanned;
 use verus_syn::visit::Visit;
-use verus_syn::{FnMode, ImplItemFn, Item, ItemFn, ItemMacro, TraitItemFn, Visibility};
+use verus_syn::{Attribute, FnMode, ImplItemFn, Item, ItemFn, ItemMacro, TraitItemFn, Visibility};
 use walkdir::WalkDir;
 
 /// Type alias for spec clause line ranges: (requires_range, ensures_range)
@@ -41,6 +41,16 @@ fn convert_mode(mode: &FnMode) -> FunctionMode {
         FnMode::Proof(_) | FnMode::ProofAxiom(_) => FunctionMode::Proof,
         FnMode::Exec(_) | FnMode::Default => FunctionMode::Exec,
     }
+}
+
+/// Check whether `attrs` contains `#[verifier::<attr_name>]` using the AST
+/// (e.g., `has_verifier_attr(attrs, "external_body")`).
+fn has_verifier_attr(attrs: &[Attribute], attr_name: &str) -> bool {
+    attrs.iter().any(|attr| {
+        let path = attr.path();
+        let segments: Vec<_> = path.segments.iter().collect();
+        segments.len() == 2 && segments[0].ident == "verifier" && segments[1].ident == attr_name
+    })
 }
 
 /// A collected function call from a spec clause.
@@ -568,6 +578,12 @@ pub struct FunctionInfo {
     /// Whether the function body contains assume() or admit() (trusted assumptions)
     #[serde(default)]
     pub has_trusted_assumption: bool,
+    /// Whether the function has #[verifier::external_body] attribute
+    #[serde(default)]
+    pub is_external_body: bool,
+    /// Whether the function has #[verifier::exec_allows_no_decreases_clause] attribute
+    #[serde(default)]
+    pub has_no_decreases_attr: bool,
     /// Raw text of the requires clause (precondition), if present and requested
     #[serde(skip_serializing_if = "Option::is_none")]
     pub requires_text: Option<String>,
@@ -630,6 +646,59 @@ pub struct FunctionInfo {
         default
     )]
     pub requires_method_calls: Vec<String>,
+
+    // === Fields for specs-data generation ===
+    /// Display name including impl type (e.g., "FieldElement51::mul" instead of just "mul")
+    #[serde(
+        rename = "display-name",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub display_name: Option<String>,
+    /// The impl block type name (e.g., "FieldElement51"), if this is a method
+    #[serde(rename = "impl-type", skip_serializing_if = "Option::is_none", default)]
+    pub impl_type: Option<String>,
+    /// Doc comment text extracted from /// comments above the function
+    #[serde(
+        rename = "doc-comment",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub doc_comment: Option<String>,
+    /// The function signature text (everything before the opening brace)
+    #[serde(
+        rename = "signature-text",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub signature_text: Option<String>,
+    /// Full function body text (for spec functions; includes signature)
+    #[serde(rename = "body-text", skip_serializing_if = "Option::is_none", default)]
+    pub body_text: Option<String>,
+    /// Module path derived from file path (e.g., "specs::field_specs")
+    #[serde(
+        rename = "module-path",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
+    pub module_path: Option<String>,
+}
+
+impl FunctionInfo {
+    /// Whether this function has a complete proof (spec is verified, not trusted).
+    ///
+    /// A function is considered proved when it has a specification (requires/ensures)
+    /// and does **not** rely on any escape hatches:
+    /// - no `assume()` / `admit()` calls (`has_trusted_assumption`)
+    /// - no `#[verifier::external_body]` (`is_external_body`)
+    /// - no `#[verifier::exec_allows_no_decreases_clause]` (`has_no_decreases_attr`)
+    pub fn is_proved(&self) -> bool {
+        let has_spec = self.has_requires || self.has_ensures || self.is_external_body;
+        has_spec
+            && !self.has_trusted_assumption
+            && !self.is_external_body
+            && !self.has_no_decreases_attr
+    }
 }
 
 /// Output format for function listing
@@ -656,6 +725,10 @@ struct FunctionInfoVisitor {
     show_visibility: bool,
     show_kind: bool,
     include_spec_text: bool,
+    /// Enable extraction of doc comments, signatures, bodies, display names, etc.
+    include_extended_info: bool,
+    /// Current impl block type name (set while visiting an impl block)
+    current_impl_type: Option<String>,
 }
 
 impl FunctionInfoVisitor {
@@ -677,6 +750,8 @@ impl FunctionInfoVisitor {
             show_visibility,
             show_kind,
             include_spec_text,
+            include_extended_info: false,
+            current_impl_type: None,
         }
     }
 
@@ -696,6 +771,93 @@ impl FunctionInfoVisitor {
 
         let text = lines[start_idx..end_idx].join("\n");
         Some(text.trim().to_string())
+    }
+
+    /// Extract doc comment from /// lines at the start of a function span.
+    ///
+    /// verus_syn includes doc comments (which are #[doc] attributes) in the function span,
+    /// so the span start line is the first /// line. We scan forward from start_line
+    /// collecting /// lines until we hit a non-doc-comment line.
+    fn extract_doc_comment(&self, start_line: usize) -> Option<String> {
+        if !self.include_extended_info {
+            return None;
+        }
+        let content = self.file_content.as_ref()?;
+        let lines: Vec<&str> = content.lines().collect();
+        let start_idx = start_line.saturating_sub(1); // convert to 0-indexed
+
+        let mut doc_lines: Vec<&str> = Vec::new();
+        for line in &lines[start_idx..] {
+            let stripped = line.trim();
+            if stripped.starts_with("///") {
+                let text = stripped.strip_prefix("///").unwrap_or("");
+                let text = text.strip_prefix(' ').unwrap_or(text);
+                doc_lines.push(text);
+            } else {
+                break;
+            }
+        }
+
+        if doc_lines.is_empty() {
+            return None;
+        }
+        Some(doc_lines.join("\n"))
+    }
+
+    /// Extract the function signature text from source (everything before the opening brace).
+    ///
+    /// Skips doc comments (`///`) and attribute lines (`#[`) at the start of the span,
+    /// then collects from the `fn` keyword line until the body-opening `{`.
+    fn extract_signature_text(&self, start_line: usize, end_line: usize) -> Option<String> {
+        if !self.include_extended_info {
+            return None;
+        }
+        let content = self.file_content.as_ref()?;
+        let lines: Vec<&str> = content.lines().collect();
+        let start_idx = start_line.saturating_sub(1);
+        let end_idx = end_line.min(lines.len());
+
+        if start_idx >= lines.len() {
+            return None;
+        }
+
+        // Phase 1: skip doc comments and attributes to find the fn declaration line.
+        let mut sig_start = start_idx;
+        for line in &lines[start_idx..end_idx] {
+            let trimmed = line.trim();
+            if trimmed.starts_with("///") || trimmed.starts_with("#[") {
+                sig_start += 1;
+            } else {
+                break;
+            }
+        }
+
+        // Phase 2: collect from the fn declaration until the body-opening `{`.
+        let mut sig_lines = Vec::new();
+        for line in &lines[sig_start..end_idx] {
+            if let Some(brace_pos) = line.find('{') {
+                // Include text before the brace on this line
+                let before = line[..brace_pos].trim_end();
+                if !before.is_empty() {
+                    sig_lines.push(before);
+                }
+                break;
+            }
+            sig_lines.push(line.trim());
+        }
+
+        if sig_lines.is_empty() {
+            return None;
+        }
+        Some(sig_lines.join("\n"))
+    }
+
+    /// Extract full function body text (signature + body) from source.
+    fn extract_body_text(&self, start_line: usize, end_line: usize) -> Option<String> {
+        if !self.include_extended_info {
+            return None;
+        }
+        self.extract_text_from_span(start_line, end_line)
     }
 
     /// Extract spec text (requires or ensures) from a signature spec clause.
@@ -782,6 +944,7 @@ impl FunctionInfoVisitor {
         span: proc_macro2::Span,
         sig: &verus_syn::Signature,
         vis: &Visibility,
+        attrs: &[Attribute],
         context: Option<String>,
     ) {
         if !self.should_include_function(sig) {
@@ -811,6 +974,8 @@ impl FunctionInfoVisitor {
         let has_ensures = sig.spec.ensures.is_some();
         let has_decreases = sig.spec.decreases.is_some();
         let has_trusted_assumption = self.has_trusted_assumption(start_line, end_line);
+        let is_external_body = has_verifier_attr(attrs, "external_body");
+        let has_no_decreases_attr = has_verifier_attr(attrs, "exec_allows_no_decreases_clause");
 
         // Extract spec text if requested
         let requires_text = self.extract_spec_text(sig.spec.requires.as_ref());
@@ -867,6 +1032,24 @@ impl FunctionInfoVisitor {
             .map(|c| c.method_call_names())
             .unwrap_or_default();
 
+        // Extended info fields (for specs-data generation)
+        let impl_type = self.current_impl_type.clone();
+        let display_name = if self.include_extended_info {
+            Some(match &impl_type {
+                Some(t) => format!("{}::{}", t, name),
+                None => name.clone(),
+            })
+        } else {
+            None
+        };
+        let doc_comment = self.extract_doc_comment(start_line);
+        let signature_text = self.extract_signature_text(start_line, end_line);
+        let body_text = if self.include_extended_info && mode == FunctionMode::Spec {
+            self.extract_body_text(start_line, end_line)
+        } else {
+            None
+        };
+
         self.functions.push(FunctionInfo {
             name,
             file: self.file_path.clone(),
@@ -883,6 +1066,8 @@ impl FunctionInfoVisitor {
             has_ensures,
             has_decreases,
             has_trusted_assumption,
+            is_external_body,
+            has_no_decreases_attr,
             requires_text,
             ensures_text,
             ensures_calls,
@@ -893,6 +1078,12 @@ impl FunctionInfoVisitor {
             ensures_method_calls,
             requires_fn_calls,
             requires_method_calls,
+            display_name,
+            impl_type,
+            doc_comment,
+            signature_text,
+            body_text,
+            module_path: None, // Set later by parse_all_functions
         });
     }
 }
@@ -906,6 +1097,7 @@ impl<'ast> Visit<'ast> for FunctionInfoVisitor {
             span,
             &node.sig,
             &node.vis,
+            &node.attrs,
             Some("standalone".to_string()),
         );
         verus_syn::visit::visit_item_fn(self, node);
@@ -918,7 +1110,14 @@ impl<'ast> Visit<'ast> for FunctionInfoVisitor {
 
         let name = node.sig.ident.to_string();
         let span = node.span();
-        self.add_function(name, span, &node.sig, &node.vis, Some("impl".to_string()));
+        self.add_function(
+            name,
+            span,
+            &node.sig,
+            &node.vis,
+            &node.attrs,
+            Some("impl".to_string()),
+        );
         verus_syn::visit::visit_impl_item_fn(self, node);
     }
 
@@ -930,16 +1129,41 @@ impl<'ast> Visit<'ast> for FunctionInfoVisitor {
         let name = node.sig.ident.to_string();
         let span = node.span();
         let vis = Visibility::Inherited;
-        self.add_function(name, span, &node.sig, &vis, Some("trait".to_string()));
+        self.add_function(
+            name,
+            span,
+            &node.sig,
+            &vis,
+            &node.attrs,
+            Some("trait".to_string()),
+        );
         verus_syn::visit::visit_trait_item_fn(self, node);
     }
 
     fn visit_item_impl(&mut self, node: &'ast verus_syn::ItemImpl) {
+        // Extract the Self type name for display_name enrichment
+        let prev_impl_type = self.current_impl_type.take();
+        if self.include_extended_info {
+            let ty = &node.self_ty;
+            let type_str = quote::quote! { #ty }.to_string();
+            // Clean up: remove spaces around :: and angle brackets for readability
+            let cleaned = type_str
+                .replace(" :: ", "::")
+                .replace("< ", "<")
+                .replace(" >", ">");
+            self.current_impl_type = Some(cleaned);
+        }
         verus_syn::visit::visit_item_impl(self, node);
+        self.current_impl_type = prev_impl_type;
     }
 
     fn visit_item_trait(&mut self, node: &'ast verus_syn::ItemTrait) {
+        let prev_impl_type = self.current_impl_type.take();
+        if self.include_extended_info {
+            self.current_impl_type = Some(node.ident.to_string());
+        }
         verus_syn::visit::visit_item_trait(self, node);
+        self.current_impl_type = prev_impl_type;
     }
 
     fn visit_item_mod(&mut self, node: &'ast verus_syn::ItemMod) {
@@ -977,6 +1201,27 @@ pub fn parse_file_for_functions(
     show_kind: bool,
     include_spec_text: bool,
 ) -> Result<Vec<FunctionInfo>, String> {
+    parse_file_for_functions_ext(
+        file_path,
+        include_verus_constructs,
+        include_methods,
+        show_visibility,
+        show_kind,
+        include_spec_text,
+        false,
+    )
+}
+
+/// Parse a file with optional extended info (doc comments, signatures, bodies, display names).
+pub fn parse_file_for_functions_ext(
+    file_path: &Path,
+    include_verus_constructs: bool,
+    include_methods: bool,
+    show_visibility: bool,
+    show_kind: bool,
+    include_spec_text: bool,
+    include_extended_info: bool,
+) -> Result<Vec<FunctionInfo>, String> {
     let content = fs::read_to_string(file_path)
         .map_err(|e| format!("Failed to read file {}: {}", file_path.display(), e))?;
 
@@ -992,6 +1237,7 @@ pub fn parse_file_for_functions(
         show_kind,
         include_spec_text,
     );
+    visitor.include_extended_info = include_extended_info;
     visitor.visit_file(&syntax_tree);
 
     Ok(visitor.functions)
@@ -1016,6 +1262,27 @@ pub fn parse_all_functions(
     show_visibility: bool,
     show_kind: bool,
     include_spec_text: bool,
+) -> ParsedOutput {
+    parse_all_functions_ext(
+        path,
+        include_verus_constructs,
+        include_methods,
+        show_visibility,
+        show_kind,
+        include_spec_text,
+        false,
+    )
+}
+
+/// Parse all functions with optional extended info for specs-data generation.
+pub fn parse_all_functions_ext(
+    path: &Path,
+    include_verus_constructs: bool,
+    include_methods: bool,
+    show_visibility: bool,
+    show_kind: bool,
+    include_spec_text: bool,
+    include_extended_info: bool,
 ) -> ParsedOutput {
     let mut all_functions = Vec::new();
     let mut functions_by_file: HashMap<String, Vec<FunctionInfo>> = HashMap::new();
@@ -1042,19 +1309,23 @@ pub fn parse_all_functions(
     };
 
     if path.is_file() {
-        match parse_file_for_functions(
+        match parse_file_for_functions_ext(
             path,
             include_verus_constructs,
             include_methods,
             show_visibility,
             show_kind,
             include_spec_text,
+            include_extended_info,
         ) {
             Ok(mut functions) => {
                 let relative_path = make_relative(path);
-                // Update file paths in functions to use relative path
+                let module_path = derive_module_path(&relative_path);
                 for func in &mut functions {
                     func.file = Some(relative_path.clone());
+                    if include_extended_info {
+                        func.module_path = Some(module_path.clone());
+                    }
                 }
                 if !functions.is_empty() {
                     functions_by_file.insert(relative_path, functions.clone());
@@ -1071,20 +1342,24 @@ pub fn parse_all_functions(
         total_files = rust_files.len();
 
         for file_path in rust_files {
-            match parse_file_for_functions(
+            match parse_file_for_functions_ext(
                 &file_path,
                 include_verus_constructs,
                 include_methods,
                 show_visibility,
                 show_kind,
                 include_spec_text,
+                include_extended_info,
             ) {
                 Ok(mut functions) => {
                     if !functions.is_empty() {
                         let relative_path = make_relative(&file_path);
-                        // Update file paths in functions to use relative path
+                        let module_path = derive_module_path(&relative_path);
                         for func in &mut functions {
                             func.file = Some(relative_path.clone());
+                            if include_extended_info {
+                                func.module_path = Some(module_path.clone());
+                            }
                         }
                         functions_by_file.insert(relative_path, functions.clone());
                         all_functions.extend(functions);
@@ -1105,6 +1380,66 @@ pub fn parse_all_functions(
             total_files,
         },
     }
+}
+
+/// Derive a Rust-style module path from a file path.
+///
+/// Examples:
+/// - "curve25519-dalek/src/specs/field_specs.rs" -> "specs::field_specs"
+/// - "src/backend/serial/u64/scalar.rs" -> "backend::serial::u64::scalar"
+/// - "src/field.rs" -> "field"
+/// - "src/lib.rs" -> ""
+/// - "src/backend/serial/u64/mod.rs" -> "backend::serial::u64"
+pub fn derive_module_path(file_path: &str) -> String {
+    let path = file_path.replace('\\', "/");
+
+    // Strip everything up to and including "src/"
+    let after_src = if let Some(idx) = path.find("/src/") {
+        &path[idx + 5..]
+    } else if let Some(stripped) = path.strip_prefix("src/") {
+        stripped
+    } else {
+        &path
+    };
+
+    // Remove .rs extension
+    let without_ext = after_src.strip_suffix(".rs").unwrap_or(after_src);
+
+    // Remove trailing /mod or just "mod"
+    let cleaned = if let Some(stripped) = without_ext.strip_suffix("/mod") {
+        stripped
+    } else if without_ext == "mod" || without_ext == "lib" {
+        ""
+    } else {
+        without_ext
+    };
+
+    // Convert / to ::
+    cleaned.replace('/', "::")
+}
+
+/// Compute a project prefix from a source path for GitHub link generation.
+///
+/// If `src_path` is like `/path/to/curve25519-dalek/src`, returns
+/// `Some("curve25519-dalek/src")` so file paths become
+/// `curve25519-dalek/src/module/file.rs`.
+pub fn compute_project_prefix(src_path: &Path) -> Option<String> {
+    let path_str = src_path.to_string_lossy();
+    let path_str = path_str.replace('\\', "/");
+
+    // Look for a pattern like "something/src" at the end
+    if path_str.ends_with("/src") || path_str.ends_with("/src/") {
+        let trimmed = path_str.trim_end_matches('/');
+        if let Some(parent_start) = trimmed.rfind('/') {
+            let parent_path = &trimmed[..parent_start];
+            if let Some(grandparent_start) = parent_path.rfind('/') {
+                let project_name = &parent_path[grandparent_start + 1..];
+                return Some(format!("{}/src", project_name));
+            }
+        }
+    }
+
+    None
 }
 
 /// Find all functions with their line numbers (simplified output format)

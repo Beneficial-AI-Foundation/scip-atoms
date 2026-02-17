@@ -486,6 +486,8 @@ mod tests {
             has_ensures: !ensures_calls.is_empty(),
             has_decreases: false,
             has_trusted_assumption: false,
+            is_external_body: false,
+            has_no_decreases_attr: false,
             requires_text: None,
             ensures_text: None,
             ensures_calls: ensures_calls.into_iter().map(String::from).collect(),
@@ -496,6 +498,12 @@ mod tests {
             ensures_method_calls: Vec::new(),
             requires_fn_calls: Vec::new(),
             requires_method_calls: Vec::new(),
+            display_name: None,
+            impl_type: None,
+            doc_comment: None,
+            signature_text: None,
+            body_text: None,
+            module_path: None,
         }
     }
 
