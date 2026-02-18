@@ -17,8 +17,8 @@ use std::path::PathBuf;
 // Import command implementations
 mod commands;
 use commands::{
-    cmd_atomize, cmd_functions, cmd_run, cmd_specify, cmd_specs_data, cmd_stubify, cmd_tracked_csv,
-    cmd_verify, OutputFormat,
+    cmd_atomize, cmd_functions, cmd_run, cmd_specs_data, cmd_specify, cmd_stubify,
+    cmd_tracked_csv, cmd_verify, OutputFormat,
 };
 
 #[derive(Parser)]
@@ -169,6 +169,10 @@ enum Commands {
         /// GitHub base URL for source links
         #[arg(long)]
         github_base_url: Option<String>,
+
+        /// Path to libsignal entrypoints JSON (focus_dalek_entrypoints.json)
+        #[arg(long)]
+        libsignal_entrypoints: Option<PathBuf>,
     },
 
     /// Generate tracked functions CSV for the dashboard
@@ -315,8 +319,9 @@ fn main() {
             src_path,
             output,
             github_base_url,
+            libsignal_entrypoints,
         } => {
-            cmd_specs_data(src_path, output, github_base_url);
+            cmd_specs_data(src_path, output, github_base_url, libsignal_entrypoints);
         }
         Commands::TrackedCsv {
             src_path,

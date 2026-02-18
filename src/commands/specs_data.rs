@@ -8,8 +8,8 @@
 use probe_verus::verus_parser::{compute_project_prefix, parse_all_functions_ext, FunctionInfo};
 use probe_verus::FunctionMode;
 use regex::Regex;
-use serde::Serialize;
-use std::collections::HashSet;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 
 /// Top-level output matching the existing specs_data.json schema.
@@ -220,9 +220,85 @@ fn make_id(module_path: &str, name: &str, display_name: &str, _line: usize) -> S
     }
 }
 
+/// Subset of the focus_dalek_entrypoints.json schema we need.
+#[derive(Deserialize)]
+struct EntrypointsJson {
+    focus_functions: Vec<FocusFunction>,
+}
+
+#[derive(Deserialize)]
+struct FocusFunction {
+    display_name: String,
+    relative_path: String,
+}
+
+/// Load libsignal entrypoints into a lookup set of `(function_name, relative_path)`.
+///
+/// The JSON stores paths like `curve25519-dalek/src/edwards.rs` while the
+/// parser produces paths relative to the src root (e.g., `edwards.rs`).
+/// We store both the original path and the src-relative suffix so matching
+/// works regardless of whether `compute_project_prefix` adds a prefix.
+fn load_libsignal_entrypoints(path: &PathBuf) -> HashSet<(String, String)> {
+    let data = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("Failed to read libsignal entrypoints {}: {}", path.display(), e));
+    let parsed: EntrypointsJson = serde_json::from_str(&data)
+        .unwrap_or_else(|e| panic!("Failed to parse libsignal entrypoints JSON: {}", e));
+    let mut set = HashSet::new();
+    for f in parsed.focus_functions {
+        set.insert((f.display_name.clone(), f.relative_path.clone()));
+        // Also insert the src-relative suffix (strip "project/src/" prefix)
+        if let Some(pos) = f.relative_path.find("/src/") {
+            let suffix = &f.relative_path[pos + 5..];
+            set.insert((f.display_name.clone(), suffix.to_string()));
+        }
+    }
+    set
+}
+
+/// Compute the transitive closure of spec/axiom names reachable from
+/// the verified functions' `referenced_specs`.
+fn compute_reachable_specs(
+    verified: &[VerifiedFunctionEntry],
+    spec_ref_map: &HashMap<String, Vec<String>>,
+) -> HashSet<String> {
+    let mut reachable = HashSet::new();
+    let mut queue: VecDeque<String> = VecDeque::new();
+    for vf in verified {
+        for s in &vf.referenced_specs {
+            if reachable.insert(s.clone()) {
+                queue.push_back(s.clone());
+            }
+        }
+    }
+    while let Some(name) = queue.pop_front() {
+        if let Some(deps) = spec_ref_map.get(&name) {
+            for dep in deps {
+                if reachable.insert(dep.clone()) {
+                    queue.push_back(dep.clone());
+                }
+            }
+        }
+    }
+    reachable
+}
+
 /// Generate specs_data.json from a source directory.
-pub fn cmd_specs_data(src_path: PathBuf, output: PathBuf, github_base_url: Option<String>) {
+pub fn cmd_specs_data(
+    src_path: PathBuf,
+    output: PathBuf,
+    github_base_url: Option<String>,
+    libsignal_entrypoints: Option<PathBuf>,
+) {
     let github_base = github_base_url.unwrap_or_default();
+
+    let libsignal_set: HashSet<(String, String)> = match &libsignal_entrypoints {
+        Some(path) => {
+            let set = load_libsignal_entrypoints(path);
+            eprintln!("Loaded {} libsignal entrypoints from {}", set.len(), path.display());
+            set
+        }
+        None => HashSet::new(),
+    };
 
     eprintln!("Parsing source files from: {}", src_path.display());
 
@@ -354,9 +430,15 @@ pub fn cmd_specs_data(src_path: PathBuf, output: PathBuf, github_base_url: Optio
                     referenced_specs: refs,
                 });
             }
-            FunctionMode::Exec | FunctionMode::Proof => {
-                // Only include functions that have specs (the "verified" panel)
-                if !func.specified {
+            FunctionMode::Proof => {
+                // Non-axiom proof functions (lemmas) are excluded from the
+                // specs browser to stay consistent with the homepage dashboard.
+            }
+            FunctionMode::Exec => {
+                // Only exec-mode functions with real specs, excluding external_body.
+                // This matches the tracked-csv selection so the specs browser
+                // count is consistent with the homepage dashboard.
+                if !func.specified || func.is_external_body {
                     continue;
                 }
 
@@ -379,8 +461,9 @@ pub fn cmd_specs_data(src_path: PathBuf, output: PathBuf, github_base_url: Optio
                 let requires = split_clauses(&func.requires_text);
                 let ensures = split_clauses(&func.ensures_text);
 
-                let has_spec = func.has_requires || func.has_ensures || func.is_external_body;
+                let has_spec = func.has_requires || func.has_ensures;
                 let has_proof = func.is_proved();
+                let is_libsignal = libsignal_set.contains(&(func.name.clone(), full_file_path.clone()));
 
                 let short_module = derive_short_module(module_path);
 
@@ -402,7 +485,7 @@ pub fn cmd_specs_data(src_path: PathBuf, output: PathBuf, github_base_url: Optio
                     github_link,
                     category: "tracked".to_string(),
                     is_public,
-                    is_libsignal: false,
+                    is_libsignal,
                     has_spec,
                     has_proof,
                 });
@@ -410,9 +493,31 @@ pub fn cmd_specs_data(src_path: PathBuf, output: PathBuf, github_base_url: Optio
         }
     }
 
+    // Prune spec functions to only those transitively reachable from
+    // verified functions. Axioms are kept unconditionally since they
+    // represent the verification's assumptions.
+    let spec_ref_map: HashMap<String, Vec<String>> = spec_functions
+        .iter()
+        .map(|s| (s.name.clone(), s.referenced_specs.clone()))
+        .collect();
+    let reachable = compute_reachable_specs(&verified_functions, &spec_ref_map);
+    let pre_prune = spec_functions.len();
+    spec_functions.retain(|s| s.category == "axiom" || reachable.contains(&s.name));
+    let axiom_count = spec_functions.iter().filter(|s| s.category == "axiom").count();
+    eprintln!(
+        "Pruned spec/axiom functions: {} -> {} ({} specs + {} axioms, reachable from {} verified functions)",
+        pre_prune,
+        spec_functions.len(),
+        spec_functions.len() - axiom_count,
+        axiom_count,
+        verified_functions.len()
+    );
+
     // Sort for deterministic output
     spec_functions.sort_by(|a, b| a.id.cmp(&b.id));
     verified_functions.sort_by(|a, b| a.id.cmp(&b.id));
+
+    let libsignal_count = verified_functions.iter().filter(|v| v.is_libsignal).count();
 
     let specs_data = SpecsData {
         spec_functions,
@@ -424,9 +529,10 @@ pub fn cmd_specs_data(src_path: PathBuf, output: PathBuf, github_base_url: Optio
     std::fs::write(&output, &json).expect("Failed to write output file");
 
     eprintln!(
-        "Wrote specs_data.json: {} spec functions, {} verified functions -> {}",
+        "Wrote specs_data.json: {} spec functions, {} verified functions ({} libsignal) -> {}",
         specs_data.spec_functions.len(),
         specs_data.verified_functions.len(),
+        libsignal_count,
         output.display()
     );
 }
